@@ -1,26 +1,52 @@
 import * as THREE from 'three';
 import type { GameState } from '../sim/GameState';
 import type { Socket, StructureInstance } from '../sim/types';
-import { ARMORY_DEF_ID, CROSSBOW_DEF_ID, type CrossbowInstance } from '../sim/structures';
+import {
+  ARC_LIGHTNING_DEF_ID,
+  ARCHER_BARRACKS_DEF_ID,
+  ARMORY_DEF_ID,
+  CROSSBOW_DEF_ID,
+  FIELD_HOSPITAL_DEF_ID,
+  FLAMETHROWER_DEF_ID,
+  MAGE_TOWER_DEF_ID,
+  TANK_BARRACKS_DEF_ID,
+  type ArcLightningInstance,
+  type CrossbowInstance,
+  type FlamethrowerInstance,
+} from '../sim/structures';
 import { R } from './scene';
+import { FLAMETHROWER } from '../data/structures';
+import {
+  buildArcherBarracksRec,
+  buildArmoryRec,
+  buildFieldHospitalRec,
+  buildMageTowerRec,
+  buildTankBarracksRec,
+} from './structures/spawnerHuts';
 
-/** Owned by [structures-allies]. Crossbow/armory meshes in sockets, upgrade looks (ballista
- *  bulk, rapid glow), recoil animation. Reads sim state only, never mutates it. Polls wall
- *  sockets every render frame — simple and automatically robust to walls/structures being
- *  rebuilt or destroyed underneath us. */
+/** Owned by [structures-allies]. Meshes for every embrasure/chamber structure. Chamber-socket
+ *  spawner buildings (Armory, Archer Barracks, Mage Tower, Tank Barracks, Field Hospital) live in
+ *  ./structures/spawnerHuts.ts (split out to stay under the ~400-line guideline once the two new
+ *  embrasure turrets below needed room) — this file is the render driver plus the three
+ *  embrasure/muzzle-mounted turrets (Crossbow, Flamethrower, Arc Lightning), which all share the
+ *  "sits at the socket's muzzlePos, rotates to aimYaw" update shape the huts don't need. Reads
+ *  sim state only, never mutates it. Polls wall sockets every render frame — simple and
+ *  automatically robust to walls/structures being rebuilt or destroyed underneath us. */
 
 const RECOIL_DURATION = 0.15; // seconds
 const RECOIL_DIST = 0.14; // local -Z kick distance
 
-interface Rec {
+export interface Rec {
   defId: string;
   group: THREE.Group;
-  // crossbow-only
+  // turret structures (crossbow/flamethrower/arc lightning): recoil/kick pivot
   recoilPivot?: THREE.Group;
   limbsMesh?: THREE.Mesh;
   accentMesh?: THREE.Mesh;
-  // armory-only
+  // any hut-style spawner building: a "has upgrades" glow indicator
   trimMesh?: THREE.Mesh;
+  // mage tower / arc lightning: idle pulse on a glowing orb
+  orbMesh?: THREE.Mesh;
 }
 
 export function initStructureView(game: GameState): void {
@@ -38,19 +64,17 @@ export function initStructureView(game: GameState): void {
   const cbBoltGeo = new THREE.CylinderGeometry(0.045, 0.06, 0.9, 6);
   const cbAccentGeo = new THREE.SphereGeometry(0.12, 8, 6);
 
-  const hutMat = new THREE.MeshLambertMaterial({ color: 0x8a7355, flatShading: true });
-  const roofMat = new THREE.MeshLambertMaterial({ color: 0x5a3f2c, flatShading: true });
-  const bannerMat = new THREE.MeshLambertMaterial({ color: 0x2f5fa8, flatShading: true, side: THREE.DoubleSide });
-  const rackMat = new THREE.MeshLambertMaterial({ color: 0x4a4a4a, flatShading: true });
-  const swordMat = new THREE.MeshLambertMaterial({ color: 0xcccccc, flatShading: true });
-  const trimMat = new THREE.MeshLambertMaterial({ color: 0xd4af37, flatShading: true });
+  // Flamethrower turret parts — a squat fuel tank + wide nozzle, reusing the crossbow's metal
+  // palette so all three embrasure turrets read as one "family" of wall-mounted hardware.
+  const flameTankGeo = new THREE.CylinderGeometry(0.3, 0.34, 0.7, 8);
+  const flameNozzleGeo = new THREE.CylinderGeometry(0.22, 0.13, 0.55, 8);
+  const flameGlowGeo = new THREE.ConeGeometry(0.26, 0.6, 8);
+  const flameGlowMat = new THREE.MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.75 });
 
-  const hutBaseGeo = new THREE.BoxGeometry(2.2, 1.3, 1.8);
-  const hutRoofGeo = new THREE.ConeGeometry(1.7, 0.9, 4);
-  const bannerGeo = new THREE.PlaneGeometry(0.5, 0.9);
-  const rackGeo = new THREE.BoxGeometry(0.9, 0.9, 0.15);
-  const swordGeo = new THREE.BoxGeometry(0.08, 0.6, 0.08);
-  const trimGeo = new THREE.BoxGeometry(0.3, 0.15, 0.3);
+  // Arc Lightning turret parts — a slim conductor rod topped with a crackling orb.
+  const rodGeo = new THREE.CylinderGeometry(0.05, 0.07, 1.1, 6);
+  const lightningOrbGeo = new THREE.OctahedronGeometry(0.24, 0);
+  const lightningOrbMat = new THREE.MeshBasicMaterial({ color: 0xd6f3ff, transparent: true, opacity: 0.9 });
 
   function buildCrossbowRec(): Rec {
     const group = new THREE.Group();
@@ -85,46 +109,62 @@ export function initStructureView(game: GameState): void {
     return { defId: CROSSBOW_DEF_ID, group, recoilPivot, limbsMesh: limbs, accentMesh: accent };
   }
 
-  function buildArmoryRec(): Rec {
+  /** Squat fuel tank + wide nozzle + a glowing cone standing in for the flame jet, visible only
+   *  while `active` (see FlamethrowerInstance) so it doesn't look permanently lit regardless of
+   *  whether anything is actually in range. */
+  function buildFlamethrowerRec(): Rec {
     const group = new THREE.Group();
-    // Sits in the courtyard behind the wall now (socket.worldPos moved off the wall top — see
-    // data/castle.ts's CHAMBER_BUILDING_OFFSET); face the banner/rack side back toward the wall's
-    // sally-port archway the allies emerge from, same Math.PI this always used.
-    group.rotation.y = Math.PI;
 
-    const base = new THREE.Mesh(hutBaseGeo, hutMat);
-    base.position.set(0, 0.65, 0);
-    group.add(base);
+    const mount = new THREE.Mesh(cbMountGeo, woodMat);
+    mount.position.set(0, -0.1, 0.15);
+    group.add(mount);
 
-    const roof = new THREE.Mesh(hutRoofGeo, roofMat);
-    roof.position.set(0, 1.3 + 0.45, 0);
-    roof.rotation.y = Math.PI / 4;
-    group.add(roof);
+    const recoilPivot = new THREE.Group();
+    group.add(recoilPivot);
 
-    const banner = new THREE.Mesh(bannerGeo, bannerMat);
-    banner.position.set(-0.6, 0.95, 0.93);
-    group.add(banner);
+    const tank = new THREE.Mesh(flameTankGeo, limbMetalMat);
+    tank.rotation.x = Math.PI / 2;
+    tank.position.set(0, 0.15, 0.4);
+    recoilPivot.add(tank);
 
-    const rack = new THREE.Mesh(rackGeo, rackMat);
-    rack.position.set(0.7, 0.5, 0.93);
-    group.add(rack);
+    const nozzle = new THREE.Mesh(flameNozzleGeo, stockMat);
+    nozzle.rotation.x = -Math.PI / 2;
+    nozzle.position.set(0, 0.12, -0.25);
+    recoilPivot.add(nozzle);
 
-    const sword1 = new THREE.Mesh(swordGeo, swordMat);
-    sword1.position.set(0.55, 0.78, 0.97);
-    sword1.rotation.z = 0.3;
-    group.add(sword1);
-    const sword2 = new THREE.Mesh(swordGeo, swordMat);
-    sword2.position.set(0.85, 0.78, 0.97);
-    sword2.rotation.z = -0.3;
-    group.add(sword2);
-
-    const trim = new THREE.Mesh(trimGeo, trimMat);
-    trim.position.set(0, 1.42, 0);
-    trim.visible = false;
-    group.add(trim);
+    const glow = new THREE.Mesh(flameGlowGeo, flameGlowMat);
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(0, 0.12, -0.75);
+    glow.visible = false;
+    recoilPivot.add(glow);
 
     R.scene.add(group);
-    return { defId: ARMORY_DEF_ID, group, trimMesh: trim };
+    return { defId: FLAMETHROWER_DEF_ID, group, recoilPivot, limbsMesh: nozzle, accentMesh: glow };
+  }
+
+  /** A slim rod topped with a crackling orb — the orb flashes brighter on every shot (see
+   *  ArcLightningInstance.firedAt) the way the crossbow's stock kicks back on recoil. */
+  function buildArcLightningRec(): Rec {
+    const group = new THREE.Group();
+
+    const mount = new THREE.Mesh(cbMountGeo, woodMat);
+    mount.position.set(0, -0.1, 0.15);
+    group.add(mount);
+
+    const recoilPivot = new THREE.Group();
+    group.add(recoilPivot);
+
+    const rod = new THREE.Mesh(rodGeo, limbMetalMat);
+    rod.rotation.x = Math.PI / 2;
+    rod.position.set(0, 0.4, -0.15);
+    recoilPivot.add(rod);
+
+    const orb = new THREE.Mesh(lightningOrbGeo, lightningOrbMat);
+    orb.position.set(0, 0.4, -0.7);
+    recoilPivot.add(orb);
+
+    R.scene.add(group);
+    return { defId: ARC_LIGHTNING_DEF_ID, group, recoilPivot, orbMesh: orb };
   }
 
   function updateCrossbowRec(rec: Rec, structure: StructureInstance, socket: Socket, g: GameState): void {
@@ -134,9 +174,10 @@ export function initStructureView(game: GameState): void {
 
     const isBallista = structure.purchased.includes('ballista1') || structure.purchased.includes('ballista2');
     const isRapid = structure.purchased.includes('rapid1') || structure.purchased.includes('rapid2');
+    const isCannon = structure.purchased.includes('cannon1') || structure.purchased.includes('cannon2');
 
-    rec.group.scale.setScalar(isBallista ? 1.35 : 1);
-    if (rec.limbsMesh) rec.limbsMesh.material = isBallista ? limbMetalMat : limbWoodMat;
+    rec.group.scale.setScalar(isCannon ? 1.6 : isBallista ? 1.35 : 1);
+    if (rec.limbsMesh) rec.limbsMesh.material = isCannon || isBallista ? limbMetalMat : limbWoodMat;
     if (rec.accentMesh) {
       rec.accentMesh.visible = isRapid;
       if (isRapid) rec.accentMesh.scale.setScalar(1 + Math.sin(g.time * 6) * 0.15);
@@ -149,10 +190,66 @@ export function initStructureView(game: GameState): void {
     }
   }
 
-  function updateArmoryRec(rec: Rec, structure: StructureInstance, socket: Socket): void {
+  /** Fixed facing (no aim tracking — it bathes its whole cone at once); the glow cone is only
+   *  visible while `active` and its length grows with the currently-purchased level's range, so
+   *  the model itself hints at the roadmap's "AoE grows with level" instead of a static prop. */
+  function updateFlamethrowerRec(rec: Rec, structure: StructureInstance, socket: Socket, g: GameState): void {
+    const ft = structure as FlamethrowerInstance;
+    rec.group.position.copy(socket.muzzlePos);
+    rec.group.rotation.y = ft.aimYaw;
+    if (rec.accentMesh) {
+      rec.accentMesh.visible = ft.active;
+      if (ft.active) {
+        const flicker = 1 + Math.sin(g.time * 30) * 0.18;
+        rec.accentMesh.scale.set(flicker, flicker, (ft.currentRange / FLAMETHROWER.range) * flicker);
+      }
+    }
+  }
+
+  /** No aim tracking beyond facing the last target (this is a chain hit, not a lead-and-fire
+   *  weapon); the orb flashes brighter for a beat right after firing, mirroring the crossbow's
+   *  recoil kick as the "something just happened" cue. */
+  function updateArcLightningRec(rec: Rec, structure: StructureInstance, socket: Socket, g: GameState): void {
+    const al = structure as ArcLightningInstance;
+    rec.group.position.copy(socket.muzzlePos);
+    rec.group.rotation.y = al.aimYaw;
+    if (rec.orbMesh) {
+      const since = g.time - al.firedAt;
+      const flash = since >= 0 && since < 0.15 ? 1.8 - since * 5 : 1;
+      rec.orbMesh.scale.setScalar(flash * (1 + Math.sin(g.time * 10) * 0.08));
+    }
+  }
+
+  /** Every hut-style spawner building shares this: sit at the socket's ground position, show a
+   *  little gold trim once any upgrade has been purchased. The Mage Tower additionally pulses
+   *  its finial orb so the tower reads as "active" even at a glance from across the courtyard. */
+  function updateHutRec(rec: Rec, structure: StructureInstance, socket: Socket, g: GameState): void {
     rec.group.position.copy(socket.worldPos);
     if (rec.trimMesh) rec.trimMesh.visible = structure.purchased.length > 0;
+    if (rec.orbMesh) {
+      const s = 1 + Math.sin(g.time * 2.4) * 0.12;
+      rec.orbMesh.scale.setScalar(s);
+    }
   }
+
+  const BUILDERS: Record<string, () => Rec> = {
+    [CROSSBOW_DEF_ID]: buildCrossbowRec,
+    [FLAMETHROWER_DEF_ID]: buildFlamethrowerRec,
+    [ARC_LIGHTNING_DEF_ID]: buildArcLightningRec,
+    [ARMORY_DEF_ID]: buildArmoryRec,
+    [ARCHER_BARRACKS_DEF_ID]: buildArcherBarracksRec,
+    [MAGE_TOWER_DEF_ID]: buildMageTowerRec,
+    [TANK_BARRACKS_DEF_ID]: buildTankBarracksRec,
+    [FIELD_HOSPITAL_DEF_ID]: buildFieldHospitalRec,
+  };
+
+  // Turrets sit at the socket's muzzlePos and rotate to face aimYaw; huts sit at the socket's
+  // ground worldPos and never rotate beyond their fixed courtyard-facing orientation.
+  const TURRET_UPDATERS: Record<string, typeof updateCrossbowRec> = {
+    [CROSSBOW_DEF_ID]: updateCrossbowRec,
+    [FLAMETHROWER_DEF_ID]: updateFlamethrowerRec,
+    [ARC_LIGHTNING_DEF_ID]: updateArcLightningRec,
+  };
 
   const active = new Map<string, Rec>();
   const seen = new Set<string>();
@@ -168,15 +265,15 @@ export function initStructureView(game: GameState): void {
 
           let rec = active.get(socket.id);
           if (!rec || rec.defId !== structure.defId) {
-            if (rec) {
-              R.scene.remove(rec.group);
-            }
-            rec = structure.defId === CROSSBOW_DEF_ID ? buildCrossbowRec() : buildArmoryRec();
+            if (rec) R.scene.remove(rec.group);
+            const build = BUILDERS[structure.defId] ?? buildArmoryRec;
+            rec = build();
             active.set(socket.id, rec);
           }
 
-          if (rec.defId === CROSSBOW_DEF_ID) updateCrossbowRec(rec, structure, socket, g);
-          else updateArmoryRec(rec, structure, socket);
+          const updateTurret = TURRET_UPDATERS[rec.defId];
+          if (updateTurret) updateTurret(rec, structure, socket, g);
+          else updateHutRec(rec, structure, socket, g);
         }
       }
 

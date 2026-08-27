@@ -36,6 +36,10 @@ export interface Impact {
   radius?: number;
   /** How long the effect actually persists (a slow/stagger window), for lingering visuals. */
   duration?: number;
+  /** World-space Y of the attack's real source (e.g. a dragon's dive-bottom altitude), for
+   *  effects that draw a beam connecting an airborne attacker to the ground point it hit.
+   *  Omitted for grounded impacts. */
+  originY?: number;
 }
 
 const tmp = new Vector3();

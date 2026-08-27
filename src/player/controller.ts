@@ -1,5 +1,6 @@
 import type { GameState } from '../sim/GameState';
 import type { PlayerState } from '../sim/types';
+import type { LadderInfo } from '../sim/ladders';
 import { createPlayer } from '../sim/classes';
 import { MAGE } from '../data/mage';
 import { ENEMY_SPAWN_Z, STAIR_LENGTH, WALL_THICKNESS, WALL_Z } from '../data/castle';
@@ -28,7 +29,19 @@ import { R } from '../render/scene';
  *   - pullPlayer(): a reel-in (Archer's Grapple). A separate tick path that overrides movement
  *     AND gravity entirely — a straight-line lerp toward the anchor, clamped to never sink below
  *     the walkable surface (so it rides up and over a raised ledge instead of clipping into it)
- *     and bounded by a deadline so it can never strand the player mid-pull. */
+ *     and bounded by a deadline so it can never strand the player mid-pull.
+ *
+ *  A third override, climbing, lives here too — not a mobility ABILITY (no cooldown, no class
+ *  gating), but a movement MODE the plain WASD path itself falls into. Walking into a wall face
+ *  the STEP_UP rule would otherwise bounce you off of, right where sim/castle.ts's ladderAt()
+ *  says there's a usable ladder, grabs it instead of just stopping: gravity suspends, W/S (the
+ *  same `forward` axis as walking) climbs up/down, and reaching the top deposits you cleanly on
+ *  the wall walk (see tickClimb). Strafing (A/D) or the ladder becoming unusable mid-climb (a
+ *  front ladder when combat starts, or the wall under it getting destroyed) both just let go —
+ *  the player drops and falls under ordinary gravity from wherever they were, never teleported.
+ *  Every other mobility override cancels an in-flight climb the same way it cancels a rival
+ *  override, and a direct pos.set() (Blink, via resetFall()) does too, so nothing can leave a
+ *  stale climb pinned to a ladder the player is no longer anywhere near. */
 
 export const EYE_HEIGHT = 1.6;
 
@@ -39,6 +52,12 @@ const GRAVITY = 14;
 const STEP_UP = 0.6; // max walkable rise; taller = obstacle (wall sides)
 const SNAP_DOWN = 0.5; // stick to ground walking down ramps
 const SKIN = 0.35; // horizontal probe padding so the camera doesn't clip into wall faces
+// Vertical speed while climbing a ladder — deliberately slower than every class's moveSpeed
+// (6-6.5) so it reads as climbing, not walking turned sideways.
+const CLIMB_SPEED = 3.6;
+// How hard a strafe key has to be pressed to let go of a ladder mid-climb (see tickClimb). The
+// raw strafe axis is always exactly -1/0/1 (see applyMove), so this just needs to be > 0.
+const CLIMB_RELEASE_STRAFE = 0.4;
 // Pull (grapple) tuning: how close counts as "arrived" (avoids asymptotic floating-point creep
 // on the final lerp step — the anchor itself is always a walkable point, worldHeight-derived, so
 // snapping onto it exactly is safe, this is purely a stop-iterating threshold, not a deliberate
@@ -67,6 +86,13 @@ export const isMenuOpen = (): boolean => document.body.dataset.menuOpen === '1';
 
 /** Read-only motion info for the viewmodel (walk bob etc.). Updated every sim tick. */
 export const playerMotion = { velX: 0, velY: 0, velZ: 0, grounded: true };
+
+/** Non-frozen ladder query, read off game.castle via a narrow local interface + cast — the same
+ *  pattern render/castleView.ts uses for wallMerlonBonus (see docs/ARCHITECTURE.md). ladderAt
+ *  isn't part of the frozen CastleApi (types.ts) since only this controller needs it. */
+interface CastleLadders {
+  ladderAt(x: number, y: number, z: number): LadderInfo | null;
+}
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -171,6 +197,9 @@ export function initPlayer(game: GameState): void {
   resetFallHook = () => {
     vy = 0;
     grounded = true;
+    // A direct pos.set() (Blink) must not leave a stale climb pinned to the ladder the player
+    // was on before teleporting — see the module doc comment.
+    climbing = false;
   };
   moveSpeedMultHook = (mult) => {
     moveSpeedMult = mult;
@@ -192,6 +221,16 @@ export function initPlayer(game: GameState): void {
   let pullDeadline = 0;
   let pullOnArrive: (() => void) | null = null;
 
+  // --- Climb (ladder) state: gravity suspended, x/z locked to the ladder, y under direct
+  // control. Not driven by a hook like launch/pull (nothing casts it) — plain WASD falls into
+  // it by itself when it walks into a usable ladder; see applyMove's horizontal-collision block
+  // and the module doc comment. ---
+  let climbing = false;
+  let climbX = 0;
+  let climbZ = 0;
+  let climbTopY = 0;
+  let climbDismountZ = 0;
+
   function endPull(): void {
     pulling = false;
     vy = 0;
@@ -210,8 +249,19 @@ export function initPlayer(game: GameState): void {
     cb?.();
   }
 
+  /** Let go of the ladder wherever the player currently is — used both by a deliberate exit
+   *  (reaching the top/bottom, strafing off) and an involuntary one (the ladder stops being
+   *  usable mid-climb). Never repositions the player: gravity resuming from the exact height
+   *  they let go at is the "drop, don't teleport" rule from the module doc, applied uniformly. */
+  function endClimb(grounded_: boolean): void {
+    climbing = false;
+    grounded = grounded_;
+    if (grounded) vy = 0;
+  }
+
   launchHook = (dirX, dirZ, hSpeed, vSpeed, onLand) => {
     if (pulling) endPull(); // the two overrides can't coexist — finalize whichever was running
+    if (climbing) endClimb(false); // let go and fall from here; the leap's own vy takes over below
     const len = Math.hypot(dirX, dirZ) || 1;
     launchVX = (dirX / len) * hSpeed;
     launchVZ = (dirZ / len) * hSpeed;
@@ -223,6 +273,7 @@ export function initPlayer(game: GameState): void {
 
   pullHook = (tx, ty, tz, speed, timeout, onArrive) => {
     if (launching) endLaunch();
+    if (climbing) endClimb(false); // let go; the pull's own straight-line lerp takes over below
     pulling = true;
     pullTX = tx;
     pullTY = ty;
@@ -233,6 +284,56 @@ export function initPlayer(game: GameState): void {
     vy = 0;
     grounded = false;
   };
+
+  /** One tick of climbing a ladder: gravity is suspended, x/z stay locked to the ladder's own
+   *  line so there's no drift, and the `forward` axis (same W/S as walking) drives y directly at
+   *  a constant CLIMB_SPEED — up on W, down on S, holding position when neither is pressed.
+   *
+   *  Three ways off, all handled here every tick:
+   *   - Reach the top (y clamps at the ladder's topY): step off onto the wall walk at
+   *     climbDismountZ — well inside the walkway past the parapet/merlon band, never at the lip
+   *     — grounded, no launch, no lingering vy. This is the "smooth dismount" the feature lives
+   *     or dies on; landing anywhere else would read as broken.
+   *   - Reach the bottom (y clamps at 0) while still pressing S: there's solid ground right
+   *     there, so just stand on it — grounded, ordinary walking resumes next tick.
+   *   - Strafe hard enough (CLIMB_RELEASE_STRAFE) or the ladder stops being usable out from
+   *     under the player (front ladder + combat starts, or its wall gets destroyed — checked
+   *     fresh against castle.ladderAt every tick, never trusted from grab-time): let go from
+   *     wherever they currently are and fall under ordinary gravity. Per the design decision
+   *     (see module doc), that drop is deliberate — never a teleport to the top or bottom. */
+  function tickClimb(p: PlayerState, forward: number, strafe: number, dt: number): void {
+    const stillUsable = (game.castle as unknown as CastleLadders).ladderAt(climbX, p.pos.y, climbZ) !== null;
+    if (!stillUsable || Math.abs(strafe) >= CLIMB_RELEASE_STRAFE) {
+      if (!stillUsable) game.events.emit('ui:toast', { text: 'The ladder gives way — you drop!' });
+      endClimb(false); // let go from exactly here; gravity (next tick, now that climbing=false) takes it from there — never a teleport
+      playerMotion.velX = playerMotion.velZ = playerMotion.velY = 0;
+      playerMotion.grounded = false;
+      return;
+    }
+
+    const oldY = p.pos.y;
+    const ny = clamp(oldY + forward * CLIMB_SPEED * dt, 0, climbTopY);
+    p.pos.set(climbX, ny, climbZ);
+
+    if (ny >= climbTopY) {
+      p.pos.set(climbX, climbTopY, climbDismountZ); // step off onto the wall walk, not the lip
+      endClimb(true);
+      playerMotion.velX = playerMotion.velZ = playerMotion.velY = 0;
+      playerMotion.grounded = true;
+      return;
+    }
+    if (ny <= 0 && forward < 0) {
+      endClimb(true); // solid ground is right here; stay put, walk away normally next tick
+      playerMotion.velX = playerMotion.velZ = playerMotion.velY = 0;
+      playerMotion.grounded = true;
+      return;
+    }
+
+    playerMotion.velX = 0;
+    playerMotion.velZ = 0;
+    playerMotion.velY = (ny - oldY) / dt;
+    playerMotion.grounded = false;
+  }
 
   /** One tick of the grapple reel-in: a straight-line lerp toward the anchor at a constant
    *  speed, clamped to the playfield box and never allowed to sink below the walkable surface —
@@ -313,11 +414,22 @@ export function initPlayer(game: GameState): void {
     if (!p.alive) {
       // Dead: frozen where they died until classes.ts respawns them at the keep. A leap in
       // flight when death happens (e.g. an arrow mid-air) is cancelled outright, not resolved —
-      // there's no sensible landing spot to slam down at once you're already dead.
+      // there's no sensible landing spot to slam down at once you're already dead. A climb is
+      // likewise abandoned outright rather than resolved to top/bottom — same "no sensible
+      // resolution once dead" reasoning.
       if (launching) endLaunch();
+      climbing = false;
       vy = 0;
       grounded = true;
       playerMotion.velX = playerMotion.velZ = playerMotion.velY = 0;
+      return;
+    }
+
+    // A climb in progress takes over movement entirely, exactly like an in-flight pull does at
+    // the call site in the tick() system below — except a climb starts from plain WASD instead
+    // of an ability, so it's intercepted here rather than short-circuiting the whole system.
+    if (climbing) {
+      tickClimb(p, forward, strafe, dt);
       return;
     }
 
@@ -359,7 +471,35 @@ export function initPlayer(game: GameState): void {
     if (mz !== 0) {
       const nz = clamp(p.pos.z + mz * dt, MIN_Z, MAX_Z);
       const probe = castle.worldHeight(p.pos.x, nz + Math.sign(mz) * SKIN);
-      if (probe - p.pos.y <= STEP_UP) p.pos.z = nz;
+      if (probe - p.pos.y <= STEP_UP) {
+        p.pos.z = nz;
+      } else if (!launching && forward !== 0) {
+        // Blocked by a wall face taller than a normal step — exactly the situation a ladder
+        // exists to solve. Grab it instead of just bonking into the stone if sim/castle.ts says
+        // there's a usable one right where we're trying to walk into. Gated on `forward !== 0`
+        // (not just "mz got blocked") so a pure strafe past a wall's base can never snag on a
+        // ladder the player wasn't trying to climb — W/S is the deliberate "climb" input, exactly
+        // like walking; never mid-leap either, since a launch has its own vy/gravity arc and
+        // shouldn't be hijacked by a ladder it grazes in flight. Snaps x/z onto the ladder's own
+        // line (climbX/climbZ) so the climb starts centered even if the player approached a
+        // little off-axis, within LADDER_REACH_X/Z's tolerance.
+        const ladder = (castle as unknown as CastleLadders).ladderAt(p.pos.x, p.pos.y, nz);
+        if (ladder) {
+          climbing = true;
+          climbX = ladder.x;
+          climbZ = ladder.climbZ;
+          climbTopY = ladder.topY;
+          climbDismountZ = ladder.dismountZ;
+          vy = 0;
+          grounded = false;
+        }
+      }
+    }
+    if (climbing) {
+      // Grabbed a ladder this same tick, above — hand off to tickClimb immediately rather than
+      // falling through to this tick's (now stale) gravity/ground integration below.
+      tickClimb(p, forward, strafe, dt);
+      return;
     }
 
     // Vertical: jump, gravity, ground clamp (walkable heights come from the castle sim). A leap

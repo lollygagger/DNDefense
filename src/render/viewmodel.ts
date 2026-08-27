@@ -14,7 +14,7 @@ import { actionState } from '../player/actionState';
 
 // Viewmodel scale: kept small enough that even full-extension animations stay clear of the
 // crosshair at screen center (see each rig's own base position/scale below).
-const MAGE_SCALE = 0.34, WARRIOR_SCALE = 0.42, ARCHER_SCALE = 0.5, MAGE_ORB_EMISSIVE = 1.3;
+const MAGE_SCALE = 0.34, WARRIOR_SCALE = 0.42, ARCHER_SCALE = 0.5, TANK_SCALE = 0.4, MAGE_ORB_EMISSIVE = 1.3;
 // Point lights sit ~0.6 units from the camera; anything with real reach floods the scene.
 const BASE_LIGHT_INTENSITY = 0.1, LIGHT_DISTANCE = 1.5, FLASH_DECAY = 0.25;
 // Archer draw/loose.
@@ -143,6 +143,10 @@ const ABILITY_ANIM: Record<string, AbilityAnim> = {
   piercingShot: gesture({ z: 0.14, rx: 0.22, rz: 0.06 }, 0.22),
   pinningShot: gesture({ z: -0.05, rx: -0.08, scale: 0.04 }, 0.3),
   grapple: gesture({ z: -0.16, rx: -0.35, ry: -0.15 }, 0.3),
+  shieldBash: gesture({ z: -0.1, x: -0.06, rx: -0.16 }, 0.16),
+  shieldSlam: groundSlamAnim, // same overhead-raise/hold/smash arc — a mace slam is the same gesture
+  bulwark: gesture({ y: 0.08, z: 0.12, rx: -0.12 }, 0.5),
+  shieldCharge: gesture({ z: -0.08, rx: -0.1, y: -0.05 }, 0.22),
 };
 
 // ---------- rigs ----------
@@ -297,10 +301,13 @@ function buildArcherRig(): ViewmodelRig {
     continuous(dt, ctx) {
       localT += dt;
       arrowGroup.visible = !!ctx.chargingId;
-      if (ctx.chargingId) {
-        drawVisual = ctx.charge01;
-        recoilT = 1;
-      } else if (ctx.justReleased) {
+      // justReleased is checked unconditionally (not gated behind "chargingId just went
+      // false") so a rank with the generic `autoFire` stat (archer's Quickshot rank V — see
+      // player/casting.ts's autoFiringId path) can keep chargingId truthy across an entire
+      // held burst and still get a visible per-shot recoil kick each time actionState.releasedAt
+      // ticks: the normal single-draw flow already clears chargingId before releasing, so this
+      // is a superset of the old behavior, not a change to it.
+      if (ctx.justReleased) {
         recoilT = 0;
         releaseFrom = drawVisual;
       }
@@ -309,7 +316,9 @@ function buildArcherRig(): ViewmodelRig {
         // Fast decay from the release point plus a brief negative overshoot (the string
         // snapping past rest) that itself settles back to 0 by recoilT=1.
         drawVisual = releaseFrom * (1 - recoilT) ** 3 - RECOIL_OVERSHOOT * Math.sin(recoilT * Math.PI) * (1 - recoilT);
-      } else if (!ctx.chargingId) {
+      } else if (ctx.chargingId) {
+        drawVisual = ctx.charge01;
+      } else {
         drawVisual = 0;
       }
 
@@ -331,12 +340,49 @@ function buildArcherRig(): ViewmodelRig {
   };
 }
 
+/** Tank: a round shield (with a flash-reactive amber boss) held forward-left, a flanged mace
+ *  held forward-right — the bulkiest, heaviest-weighted rig (weight 1) so its camera-lag and
+ *  landing dip both read as the slowest, heaviest class in the game. */
+function buildTankRig(): ViewmodelRig {
+  const basePos = new THREE.Vector3(0.3, -0.36, -0.6), baseRot = new THREE.Euler(-0.12, 0.16, -0.1);
+  const group = startRig(basePos, baseRot, TANK_SCALE);
+
+  const steelMat = stdMat(0x6b7280, { roughness: 0.55, metalness: 0.5 });
+  const shield = addMesh(group, new THREE.CylinderGeometry(0.34, 0.34, 0.06, 16), steelMat, [-0.32, -0.05, -0.05]);
+  shield.rotation.x = Math.PI / 2;
+
+  addMesh(group, new THREE.CylinderGeometry(0.03, 0.036, 0.85, 8), stdMat(0x4a3520, { roughness: 0.85 }), [0.3, 0.5, 0]);
+  const headMat = stdMat(0x8a8f96, { roughness: 0.4, metalness: 0.7 });
+  addMesh(group, new THREE.SphereGeometry(0.11, 10, 8), headMat, [0.3, 0.92, 0]);
+  const flangeGeo = new THREE.BoxGeometry(0.05, 0.16, 0.05);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const fl = addMesh(group, flangeGeo, headMat, [0.3 + Math.cos(a) * 0.1, 0.92, Math.sin(a) * 0.1]);
+    fl.rotation.y = a;
+  }
+
+  const gemMat = stdMat(0xffd23f, { emissive: 0xffd23f, emissiveIntensity: 1.1, roughness: 0.3, metalness: 0.5 });
+  const gem = addMesh(group, new THREE.SphereGeometry(0.09, 10, 8), gemMat, [-0.32, -0.05, -0.08]);
+  const gemLight = addLight(group, 0xffd23f, gem.position);
+
+  return {
+    group, basePos, baseRot, baseScale: TANK_SCALE, weight: 1, light: gemLight,
+    setFlash(flash01, big) {
+      const mul = big ? 2.2 : 1;
+      gemMat.emissiveIntensity = 1.1 + flash01 * 2.5 * mul;
+      gem.scale.setScalar(1 + flash01 * 0.6 * mul);
+      gemLight.intensity = BASE_LIGHT_INTENSITY + flash01 * 0.9 * mul;
+    },
+  };
+}
+
 /** class id -> rig builder. Add a class here (and nowhere else in this file) to give it a
  *  first-person model; an id with no entry falls back to the mage staff. */
 const RIG_BUILDERS: Record<string, () => ViewmodelRig> = {
   mage: buildMageRig,
   warrior: buildWarriorRig,
   archer: buildArcherRig,
+  tank: buildTankRig,
 };
 
 // Grapple rope scratch (module scope: reused every frame, never allocated in the loop).

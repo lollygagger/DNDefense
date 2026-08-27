@@ -43,6 +43,16 @@ const quickshot: AbilityDef = {
     { cost: 40, stats: { damage: 18 } },
     { cost: 80, stats: { damage: 25 } },
     { cost: 140, stats: { damage: 34 } },
+    // Rank V (late-game gold sink, unlocks behaviour): "Rapid Volley" — Quickshot goes fully
+    // automatic. The draw itself is unchanged (still 0.7s to reach full power, still a weak
+    // plink on an early release), but if you hold through a *full* draw instead of releasing,
+    // player/casting.ts locks the bow at full power and keeps firing every 0.3s cooldown for as
+    // long as you hold — no redraw between shots. Per-shot damage actually drops slightly from
+    // rank IV (34 -> 30) to keep the ~3.3x attack-rate jump from being a pure, no-tradeoff power
+    // spike; the reward is the behaviour, not a bigger single number. See casting.ts's
+    // `autoFiringId` path for the mechanism — driven entirely by this generic `autoFire` stat,
+    // no archer-specific branching there.
+    { cost: 220, stats: { damage: 30, autoFire: 1 } },
   ],
   cast(game: GameState, _caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
     const charge = stats.charge ?? 1; // absent only if something calls this without a draw; default full power
@@ -74,6 +84,11 @@ const piercingShot: AbilityDef = {
     { cost: 40, stats: { damage: 80, pierce: 2 } },
     { cost: 80, stats: { damage: 115 } },
     { cost: 140, stats: { damage: 155, pierce: 3 } },
+    // Rank V (late-game gold sink, unlocks behaviour): "Lancing Shot" — pierce count stops
+    // being a real limit (99 is far past any lane's population), so the arrow now punches
+    // through the entire line instead of stopping after a handful of enemies. No cast() change
+    // needed: pierce was already forwarded straight to the projectile spec.
+    { cost: 220, stats: { damage: 190, pierce: 99 } },
   ],
   cast(game: GameState, _caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
     const dir = aimPoint.clone().sub(origin).normalize();

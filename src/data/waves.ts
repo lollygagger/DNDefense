@@ -30,11 +30,13 @@ export const WAVES: WaveDef[] = [
       { type: 'orc', count: 3, interval: 7, delay: 18 },
     ],
   },
-  // 6
+  // 6 — hot air balloon introduced: slow and telegraphed, a gentle first look at "something is
+  // flying over the walls" before the swarm/tank waves ramp up.
   {
     entries: [
       { type: 'goblin', count: 18, interval: 1.2, delay: 2 },
       { type: 'skeletonArcher', count: 6, interval: 4, delay: 10 },
+      { type: 'hotAirBalloon', count: 1, interval: 1, delay: 20 },
     ],
   },
   // 7 — tank wave
@@ -44,29 +46,33 @@ export const WAVES: WaveDef[] = [
       { type: 'goblin', count: 10, interval: 1.5, delay: 12 },
     ],
   },
-  // 8
+  // 8 — a second balloon, reinforcing that flyers are a recurring priority target, not a
+  // one-off gimmick.
   {
     entries: [
       { type: 'goblin', count: 20, interval: 1.1, delay: 2 },
       { type: 'orc', count: 6, interval: 5, delay: 10 },
       { type: 'skeletonArcher', count: 8, interval: 3.5, delay: 14 },
+      { type: 'hotAirBalloon', count: 1, interval: 1, delay: 18 },
     ],
   },
-  // 9 — swarm
+  // 9 — swarm, with the dragon's debut as the nasty surprise right before the boss wave.
   {
     entries: [
       { type: 'goblin', count: 28, interval: 0.9, delay: 2 },
       { type: 'skeletonArcher', count: 10, interval: 3, delay: 8 },
       { type: 'orc', count: 4, interval: 6, delay: 20 },
+      { type: 'dragon', count: 1, interval: 1, delay: 25 },
     ],
   },
-  // 10 — the Orc Warlord
+  // 10 — the Orc Warlord, with air support
   {
     entries: [
       { type: 'goblin', count: 16, interval: 1.2, delay: 2 },
       { type: 'orc', count: 6, interval: 5, delay: 8 },
       { type: 'skeletonArcher', count: 8, interval: 3.5, delay: 12 },
       { type: 'orcWarlord', count: 1, interval: 1, delay: 25 },
+      { type: 'hotAirBalloon', count: 1, interval: 1, delay: 30 },
     ],
   },
 ];

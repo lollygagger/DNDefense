@@ -1,5 +1,14 @@
-/** Structure balance data. Owned by [structures-allies]. Keep docs/GAME_DESIGN.md in sync. */
+/** Structure balance data. Owned by [structures-allies]. Keep docs/GAME_DESIGN.md in sync.
+ *  Ally combat stats (hp/damage/speed/behavior/...) live in data/allies.ts — this file only
+ *  holds the STRUCTURE-level knobs: build cost, roster caps, respawn cadence, and upgrade costs
+ *  (which translate into ally-stat multipliers, applied in sim/structures/*.ts at spawn time). */
 
+/** Crossbow — three mutually exclusive identities from first upgrade onward (Phase 2 roadmap:
+ *  "keep Rapid, extend Ballista to range+damage+pierce, add Cannon"). `projectileTtl` was a fixed
+ *  constant tuned for the base bolt (range 30 / speed 50); now that Ballista extends range and
+ *  Cannon slows the bolt down, ttl is computed per-shot in crossbow.ts as
+ *  `(effectiveRange * TTL_SAFETY) / effectiveSpeed` instead — same ~1.0s result at base stats
+ *  (30 * 1.6 / 50 = 0.96), but it stays correct as range/speed change per branch. */
 export const CROSSBOW = {
   cost: 60,
   range: 30,
@@ -7,15 +16,90 @@ export const CROSSBOW = {
   fireInterval: 1.2,
   projectileSpeed: 50,
   projectileRadius: 0.25,
-  projectileTtl: 1.0, // seconds; ~range * 1.6 at projectileSpeed
+  ttlSafetyFactor: 1.6, // ttl = range * this / speed — enough slack that a bolt never times out short of its own max range
   maxLeadTime: 1.2, // cap on linear-lead prediction seconds
   upgrades: {
     rapid1: { cost: 50, fireRateMult: 1.6 },
     rapid2: { cost: 90, fireRateMult: 2.2 }, // total, replaces rapid1's mult
-    ballista1: { cost: 50, damageMult: 2.0, pierce: 1 },
-    ballista2: { cost: 90, damageMult: 3.5, pierce: 2 }, // total, replaces ballista1's mult
+    // Ballista: range + damage + pierce, all three named explicitly in the roadmap. The
+    // long-reach precision pick — best against a single tough target far out, or a whole line
+    // of them thanks to pierce.
+    ballista1: { cost: 50, damageMult: 2.0, pierce: 1, rangeBonus: 6 },
+    ballista2: { cost: 90, damageMult: 3.5, pierce: 2, rangeBonus: 12 }, // total, replaces ballista1
+    // Cannon: a big, slow, splash-damage shot. No range or pierce bonus (splash does the
+    // multi-target work instead) and a slower reload — heavy single-shot payoff against clustered
+    // or slow targets, worst of the three against one fast/erratic mover (the slow bolt needs a
+    // long lead, and there's nothing to chain to if it whiffs).
+    cannon1: { cost: 50, damageMult: 3.0, aoeRadius: 3, projectileSpeedMult: 0.4, fireRateMult: 0.7, projectileRadius: 0.4 },
+    cannon2: { cost: 90, damageMult: 5.0, aoeRadius: 4.5, projectileSpeedMult: 0.42, fireRateMult: 0.78, projectileRadius: 0.5 }, // total, replaces cannon1
   },
 };
+
+/** Flamethrower (static defense, embrasure socket) — the roadmap's "short range but big aoe
+ *  that increases with level." The opposite trade from the crossbow: a very short, wide cone of
+ *  continuous fire instead of a precise long shot. Damage is true damage-over-time (dps * dt
+ *  applied directly every tick a target sits in the cone, never a spawned projectile), so it
+ *  reads identically at any tick rate and never becomes a "spam projectiles" loop. Cone coverage
+ *  (range x angle) grows substantially with level: Inferno II's cone covers roughly 6x the area
+ *  of the base nozzle (14 x 75 deg vs 7 x 50 deg). Ground-only — see STRUCTURE_ANTI_AIR below —
+ *  so it's a deliberate non-answer to balloons/dragons, unlike the crossbow or arc lightning. */
+export const FLAMETHROWER = {
+  cost: 130,
+  range: 7, // vs the crossbow's 30 — must let enemies close almost to the wall face to matter
+  halfArcDeg: 50, // ~100 degree total cone in front of the muzzle
+  dps: 42,
+  fxPulseInterval: 0.12, // throttles the "still burning" visual indicator only, not gameplay
+  upgrades: {
+    inferno1: { cost: 100, range: 10, halfArcDeg: 62, dps: 68 },
+    inferno2: { cost: 170, range: 14, halfArcDeg: 75, dps: 108 }, // total, replaces inferno1
+  },
+};
+
+/** Arc Lightning Tower (static defense, embrasure socket) — the roadmap's "chains between
+ *  targets" ask, built as its own embrasure tower rather than an upgrade branch: the three
+ *  embrasure slots per wall already give a player 1 defense pick each, and a chaining attack is
+ *  a genuinely different shape (mid-range, rewards spread-out groups) from both the crossbow
+ *  (long-range single-target precision) and the flamethrower (point-blank continuous cone) — a
+ *  fourth branch on an already 3-branched crossbow would have diluted that pick instead of
+ *  adding one. Each shot hits the nearest valid target in range, then jumps to the nearest
+ *  *other* enemy within chainRadius of the last one hit (never repeating a target within the
+ *  same volley), multiplying running damage by chainFalloff on every jump. Weak against a lone,
+ *  isolated target — with nothing nearby to jump to, it's a single hit at base damage, worse
+ *  per-shot than a plain crossbow bolt. Strong against clustered/spread groups within jump range
+ *  of each other, including mixed air+ground groups (see STRUCTURE_ANTI_AIR — this is the
+ *  ranged, magical anti-air pick, as opposed to the crossbow's incidental one). */
+export const ARC_LIGHTNING = {
+  cost: 150,
+  range: 20,
+  fireInterval: 1.6,
+  damage: 26,
+  chainRadius: 6,
+  chainFalloff: 0.65, // running damage multiplies by this on every jump
+  chainJumps: 2, // additional targets beyond the first (3 hit total)
+  upgrades: {
+    overcharge1: { cost: 110, damage: 34, chainJumps: 3, chainRadius: 7 },
+    overcharge2: { cost: 190, damage: 46, chainJumps: 4, chainRadius: 8.5 }, // total, replaces overcharge1
+  },
+};
+
+/** Explicit anti-air capability, per structure defId (Phase 2 roadmap: "give structures an
+ *  explicit can-this-hit-air property" instead of the crossbow's old *accidental* one — its
+ *  target search simply never had a height/type gate). `StructureDef` (sim/types.ts) is frozen,
+ *  so this is a companion lookup keyed by defId rather than a field on the def itself — the same
+ *  pattern data/enemies.ts already uses for FLYER_AI/isFlyerDef to extend the frozen `EnemyDef`.
+ *  Every structure's own target search consults this alongside `isFlyerDef(enemy.defId)`
+ *  (data/enemies.ts): `if (!structureCanHitAir(defId) && isFlyerDef(e.defId)) continue;`.
+ *  Missing defId => false: a structure has to opt in to threatening the sky, not opt out — so a
+ *  future ground-only tower added without touching this table is safely ground-only by default. */
+export const STRUCTURE_ANTI_AIR: Record<string, boolean> = {
+  crossbow: true, // full 3D aim, no height gate — unchanged behavior, now a deliberate flag
+  flamethrower: false, // a ground-hugging cone that can't reach cruise altitude
+  arcLightning: true, // bolts arc through open air exactly as readily as across the ground
+};
+
+export function structureCanHitAir(defId: string): boolean {
+  return STRUCTURE_ANTI_AIR[defId] ?? false;
+}
 
 export const ARMORY = {
   cost: 80,
@@ -28,51 +112,79 @@ export const ARMORY = {
   },
 };
 
-export const SWORDSMAN = {
-  hp: 60,
-  damage: 12,
-  attackInterval: 1.0,
-  speed: 4.8,
-  // Guard post is no longer the door — it's a battle line this far in front of the wall's
-  // front face (see guardPostFor() in sim/allies.ts). Chosen so the line:
-  //  - clears melee enemies' own unengaged stopping point at the wall (ENEMY_AI.wallStopGap
-  //    puts goblins/orcs ~2.5-3.3 off the wall), so incoming melee get intercepted by the line
-  //    before they ever reach the wall face, instead of the line just being cosmetic;
-  //  - sits well inside crossbow covering fire (CROSSBOW.range = 30 from the same wall face),
-  //    with a lot of margin to spare;
-  //  - sits well inside skeleton archer engage range (22) rather than parked right where
-  //    archers like to plant and shoot from, so swordsmen aren't stationed at "archer kiting
-  //    distance" from the wall — they're close enough to close to melee quickly;
-  //  - leaves 3 units of clearance behind it: the tier-2/tier-3 courtyards are 9 units deep
-  //    (WALL_Z spacing 12 - WALL_THICKNESS 3), so a line 6 out from the front wall's face
-  //    still sits a comfortable 3 units clear of the previous wall's back face — forms up
-  //    inside that wall's own courtyard, not crowding the wall behind it.
-  lineDistance: 6,
-  // Lateral gap between adjacent swordsmen holding the line, fanned out around the armory's
-  // socket x (see guardPostFor()). Kept greater than separationRadius so a squad standing on
-  // its posts is already spread further apart than the push-apart threshold — the separation
-  // behavior in allies.ts has nothing to fight once everyone is home on the line.
-  lineSpacing: 2.2,
-  // Target-acquisition leash, measured from the ally's guard post (now the line, not the
-  // wall). Was 30 when the post sat at the door; the post moved lineDistance (6) further out,
-  // so this shrinks by the same amount to keep the total commit envelope measured from the
-  // WALL unchanged at 30 (matching the crossbow's own range) while shortening the walk back to
-  // the line after a kill — the whole point of holding a line instead of the wall face.
-  aggroRange: 24,
-  attackRange: 1.5, // melee reach (plus target radius)
-  radius: 0.5,
-  height: 1.8,
-  separationRadius: 1.1, // allies closer than this push apart
-  separationStrength: 5, // push speed (units/s at full overlap)
-  guardTolerance: 0.75, // "close enough" to the guard post
+/** Archer Barracks (spawner, chamber socket) — ranged allies that hold the wall's line and
+ *  shoot. Priced above the Armory: ranged DPS-at-range is worth more than melee soak. The
+ *  decision: Marksmen (fewer, harder-hitting, longer-ranged archers) vs Volley (more archers,
+ *  faster fire rate) — concentrated single-target DPS vs raw volume of arrows, mutually
+ *  exclusive like the crossbow's rapid/ballista split. */
+export const ARCHER_BARRACKS = {
+  cost: 100,
+  maxArchers: 2,
+  respawnInterval: 9,
+  spawnJitter: 1.2,
+  upgrades: {
+    marksman1: { cost: 70, damageMult: 1.3 },
+    marksman2: { cost: 120, damageMult: 1.7, rangeBonus: 4 }, // total, replaces marksman1
+    volley1: { cost: 70, bonusMax: 1, fireRateMult: 1.3 },
+    volley2: { cost: 120, bonusMax: 2, fireRateMult: 1.6 }, // total, replaces volley1
+  },
 };
 
-/** Allies never chase past these bounds (keeps them off the spawn gate). Worst-case excursion
- *  from a tier-1 guard post is lineDistance + aggroRange + attackRange = 6 + 24 + 1.5 = 31.5
- *  units in front of the wall (z = -31.5 for tier 1), comfortably inside minZ; lateral reach is
- *  already capped by the enemy field bounds (FIELD_MIN_X/FIELD_MAX_X in data/castle.ts), well
- *  inside maxAbsX. */
-export const ALLY_BOUNDS = {
-  minZ: -40,
-  maxAbsX: 24,
+/** Mage Tower (spawner, chamber socket) — caster allies: fewer and pricier than any other
+ *  spawner (base cap of 1), per the task. The decision: Overload (bigger AoE nuke) vs Chilling
+ *  Presence (stronger/longer slow, a control tool) are mutually exclusive; Reinforced Spire
+ *  (a second mage) is an independent third root, orthogonal to which combat style you picked —
+ *  so "do I want a second mage at all" is its own choice, not tied to the damage/control split. */
+export const MAGE_TOWER = {
+  cost: 140,
+  maxMages: 1,
+  respawnInterval: 14,
+  spawnJitter: 1.0,
+  upgrades: {
+    overload1: { cost: 90, damageMult: 1.5, aoeMult: 1.2 },
+    overload2: { cost: 150, damageMult: 2.1, aoeMult: 1.4 }, // total, replaces overload1
+    chill1: { cost: 90, slowPctBonus: 15, durationBonus: 1 },
+    chill2: { cost: 150, slowPctBonus: 30, durationBonus: 2 }, // total, replaces chill1
+    reinforcedSpire: { cost: 130, bonusMax: 1 },
+  },
+};
+
+/** Tank Barracks (spawner, chamber socket) — bulky, slow, high-HP melee. The roster cap never
+ *  grows (2, always) — the point of a tank is that it's scarce and expensive per unit, not that
+ *  you field an army of them. The decision: Plated Armor (more HP + flat damage reduction — a
+ *  real mitigation curve, not just a bigger HP bar, so it's actually different from "soak more
+ *  hits" in how it plays against a few heavy blows vs many light ones) vs Aggressive Stance
+ *  (more damage + speed, trading pure soak for an actual threat). Mutually exclusive. */
+export const TANK_BARRACKS = {
+  cost: 120,
+  maxTanks: 2,
+  respawnInterval: 10,
+  spawnJitter: 1.2,
+  upgrades: {
+    platedArmor1: { cost: 90, hpMult: 1.3, reductionPct: 0.1 },
+    platedArmor2: { cost: 140, hpMult: 1.6, reductionPct: 0.2 }, // total, replaces platedArmor1
+    aggressive1: { cost: 90, damageMult: 1.5, speedMult: 1.2 },
+    aggressive2: { cost: 140, damageMult: 2.0, speedMult: 1.4 }, // total, replaces aggressive1
+  },
+};
+
+/** Field Hospital (spawner, chamber socket) — medic + engineer in one structure, per the
+ *  roadmap. The priciest spawner: it doesn't fight at all, its value is entirely in sustain, so
+ *  it needs to compete on "how much gold does this save you in repairs/potions" rather than
+ *  kills. Unlike the other three spawners, Combat Medics and Corps of Sappers are NOT mutually
+ *  exclusive — both are worth having on an expensive late-game building meant to do both jobs
+ *  well eventually, so the decision is priority/ordering (which do you fund first) and total
+ *  investment, not a permanent either/or. */
+export const FIELD_HOSPITAL = {
+  cost: 160,
+  maxMedics: 1,
+  maxEngineers: 1,
+  respawnInterval: 12,
+  spawnJitter: 1.2,
+  upgrades: {
+    medic1: { cost: 100, healMult: 1.5, rangeMult: 1.3 },
+    medic2: { cost: 160, healMult: 2.0, bonusMedics: 1 }, // total, replaces medic1's heal mult
+    sapper1: { cost: 100, repairMult: 1.5 },
+    sapper2: { cost: 160, repairMult: 2.2, bonusEngineers: 1 }, // total, replaces sapper1
+  },
 };

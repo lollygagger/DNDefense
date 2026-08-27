@@ -24,7 +24,13 @@ import { actionState } from './actionState';
  *     render frame while held, and mouseup looses it — tryCast (and thus the cooldown) only
  *     fires on release, with the drawn fraction passed through as a charge amount. The draw
  *     cancels cleanly (no shot, actionState reset) the instant `canAct()` goes false for any
- *     reason — menu opened, death, phase change, lost pointer lock. */
+ *     reason — menu opened, death, phase change, lost pointer lock.
+ *   - A charge ability whose *current rank* stats include a generic `autoFire` flag (only the
+ *     archer's Quickshot at rank V today, but the flag isn't archer-specific) goes full auto:
+ *     holding through a complete draw instead of releasing locks the bow at full power and
+ *     fires again every tick the cooldown allows, for as long as LMB stays down — see the
+ *     `autoFiringId` state and the `tick()` handler below. Releasing at any point before a full
+ *     draw still behaves exactly like the non-autoFire ranks (a partial-charge shot on release). */
 
 const RETICLE_COLORS: Record<string, number> = {
   fireball: 0xff6a2a,
@@ -33,6 +39,7 @@ const RETICLE_COLORS: Record<string, number> = {
   groundSlam: 0xe08a3c, // warrior: bronze/steel
   leap: 0xe08a3c,
   grapple: 0x3ea373, // archer: bow-gem teal
+  shieldSlam: 0xffd23f, // tank: shield-boss amber
 };
 const RETICLE_DEFAULT_COLOR = 0xd6c9ff;
 const FLASH_COLOR = 0xff3344;
@@ -186,6 +193,14 @@ export function initCasting(game: GameState): void {
   // hardcodes "archer"/"quickshot" — any future charge-primary class gets this for free.
   let drawingId: string | null = null;
   let drawStart = 0;
+  // Full-auto state (see types.ts's `charge` doc + the archer's Quickshot rank V): once a draw
+  // that started on an `autoFire`-ranked ability reaches a full 100% draw while still held, it
+  // transitions here instead of waiting for mouseup — tick() below then keeps re-casting at
+  // full power every tick, throttled purely by tryCast's own cooldown gate, for as long as
+  // `mouseDown` stays true. Generic on the same terms as `drawingId`: driven by a stat
+  // (`autoFire`) any charge-capable ability could opt into, not an archer-specific branch.
+  let autoFiringId: string | null = null;
+  let mouseDown = false; // raw LMB physical state, needed because auto-fire has no per-shot event
 
   const disarm = (): void => {
     armed = null;
@@ -202,18 +217,26 @@ export function initCasting(game: GameState): void {
   };
   const notReady = (def: AbilityDef): void => castFail(def, `${def.name} not ready`);
 
-  /** End a hold-to-draw in progress, for any reason (release, cancel, interruption) — resets
-   *  every bit of presentation state a draw touches so nothing lingers: the viewmodel's bow pose
-   *  (chargingId/charge01) and the move-speed penalty. Idempotent: safe to call when nothing is
-   *  being drawn. Does NOT fire a shot — callers that mean to fire do that separately, using the
+  /** End a hold-to-draw (and/or an in-progress auto-fire loop), for any reason (release,
+   *  cancel, interruption) — resets every bit of presentation state either touches so nothing
+   *  lingers: the viewmodel's bow pose (chargingId/charge01) and the move-speed penalty.
+   *  Unconditional and idempotent: safe to call whether or not anything is actually in
+   *  progress. Does NOT fire a shot — callers that mean to fire do that separately, using the
    *  drawingId/drawStart snapshot *before* calling this. */
   const endDraw = (): void => {
-    if (drawingId === null) return;
     drawingId = null;
+    autoFiringId = null;
     actionState.chargingId = null;
     actionState.charge01 = 0;
     setMoveSpeedMultiplier(1);
   };
+
+  /** Fire one auto shot at full power (reuses the same eye/dir/range math as a normal aimed
+   *  cast — auto-fire is just castAimed() called repeatedly). tryCast's own cooldown gate is
+   *  what actually throttles the rate; calling this every tick while off cooldown is a no-op. */
+  function fireAuto(player: PlayerState, def: AbilityDef): void {
+    if (castAimed(player, def)) actionState.releasedAt = game.time; // per-shot recoil kick
+  }
 
   const canAct = (): boolean => {
     const p = game.localPlayer;
@@ -269,9 +292,12 @@ export function initCasting(game: GameState): void {
 
     if (def.charge) {
       // Hold-to-draw: mousedown only starts the draw. tryCast (and its cooldown) fires on
-      // release — see the mouseup listener below.
+      // release — see the mouseup listener below — unless the ability's current rank has
+      // `autoFire` and the draw is held all the way through, in which case tick() below takes
+      // over before mouseup ever happens (see the module doc comment on autoFiringId).
       drawingId = def.id;
       drawStart = game.time;
+      mouseDown = true;
       actionState.chargingId = def.id;
       actionState.charge01 = 0;
       setMoveSpeedMultiplier(def.charge.moveSpeedMult ?? 1);
@@ -281,9 +307,17 @@ export function initCasting(game: GameState): void {
     castAimed(player, def);
   });
 
-  // ---------- mouse: release a hold-to-draw primary ----------
+  // ---------- mouse: release a hold-to-draw primary (or stop an auto-fire loop) ----------
   window.addEventListener('mouseup', (e) => {
-    if (e.button !== 0 || drawingId === null) return;
+    if (e.button !== 0) return;
+    mouseDown = false;
+    if (autoFiringId !== null) {
+      // Already firing every tick at full power — releasing just stops it. The most recent
+      // shot already fired from tick(), so there's nothing left to loose here.
+      endDraw();
+      return;
+    }
+    if (drawingId === null) return;
     const player = game.localPlayer;
     const def = player ? getAbilityDef(player.classDef, drawingId) : null;
     const charge = def?.charge;
@@ -348,6 +382,34 @@ export function initCasting(game: GameState): void {
 
   // ---------- reticle render + live draw state ----------
   game.addSystem({
+    // Auto-fire's actual sim mutation (tryCast, via fireAuto/castAimed) belongs in tick(), not
+    // render() — render() only ever reads sim state (see ARCHITECTURE.md's sim/render rule).
+    // Self-contained: re-checks canAct() itself rather than trusting the render loop below to
+    // catch a menu-open/death/phase-change in time, since tick() and render() run on different
+    // cadences (fixed-step sim vs rAF) and a mid-autofire menu open must stop shots immediately.
+    tick() {
+      if (!mouseDown || (drawingId === null && autoFiringId === null)) return;
+      if (!canAct()) {
+        endDraw();
+        return;
+      }
+      const player = game.localPlayer!;
+      if (drawingId !== null) {
+        const def = getAbilityDef(player.classDef, drawingId);
+        if (!def?.charge) return;
+        const stats = getAbilityStats(player, def.id);
+        if (!stats.autoFire) return; // not an auto-capable rank: mouseup handles the release
+        if (game.time - drawStart < def.charge.drawTime) return; // still ramping to full draw
+        // Full draw reached while still held: lock in at full power instead of waiting for
+        // mouseup — the reward moment for reaching an autoFire rank (see archer.ts rank V).
+        drawingId = null;
+        autoFiringId = def.id;
+        fireAuto(player, def);
+      } else if (autoFiringId !== null) {
+        const def = getAbilityDef(player.classDef, autoFiringId);
+        if (def) fireAuto(player, def); // tryCast's own cooldown gates the actual rate
+      }
+    },
     render() {
       // A UI menu/screen opening (E/B/Tab/start) always wins: drop any armed targeting.
       if (isMenuOpen() && armed !== null) disarm();
@@ -355,10 +417,13 @@ export function initCasting(game: GameState): void {
       // Drive charge01 live every frame so the viewmodel's draw pose is accurate every frame
       // (per the task note), and cancel the draw the instant canAct() goes false for any
       // reason not already covered by an explicit event above (menu open, lost pointer lock).
-      if (drawingId !== null) {
+      // While autoFiringId is set (rather than drawingId), charge01/chargingId are already
+      // pinned at {id, 1} from the moment of transition and need no further per-frame update —
+      // tick() above is what actually fires the shots.
+      if (drawingId !== null || autoFiringId !== null) {
         if (!canAct()) {
           endDraw();
-        } else {
+        } else if (drawingId !== null) {
           const player = game.localPlayer;
           const def = player ? getAbilityDef(player.classDef, drawingId) : null;
           if (def?.charge) {

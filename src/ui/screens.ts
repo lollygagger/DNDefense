@@ -24,7 +24,7 @@ import { escapeHtml, overlayClosed, overlayOpened } from './hud';
  *  classSelect.ts's contract and in case a future refactor makes controller.ts's read of it
  *  meaningful (e.g. a respawn/reconnect flow). */
 
-const CLASS_ICONS: Record<string, string> = { mage: '🧙', warrior: '🛡️', archer: '🏹' };
+const CLASS_ICONS: Record<string, string> = { mage: '🧙', warrior: '🛡️', archer: '🏹', tank: '🧱' };
 function classIcon(id: string): string {
   return CLASS_ICONS[id] ?? '⚔️';
 }
@@ -49,6 +49,7 @@ const CONTROLS: readonly [key: string, action: string][] = [
   ['Mouse', 'Look / aim'],
   ['WASD', 'Move'],
   ['Space', 'Jump'],
+  ['W / S at a ladder', 'Climb up / down — walk into a wall face where one hangs to grab it'],
   ['LMB', 'Primary attack — or confirm a ground-targeted cast'],
   ['2 / 3 / 4', "Use your class's abilities (ground-targeted ones arm a reticle first)"],
   ['RMB / Esc', 'Cancel ability targeting'],

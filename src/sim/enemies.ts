@@ -1,15 +1,19 @@
 import { Vector3 } from 'three';
 import type { GameState } from './GameState';
 import { allocId, type Enemy, type EnemyDef, type Unit, type Wall } from './types';
-import { ENEMY_AI, getEnemyDef } from '../data/enemies';
+import { ENEMY_AI, getEnemyDef, isFlyerDef } from '../data/enemies';
 import { ENEMY_SPAWN_Z, FIELD_MAX_X, FIELD_MIN_X, WALL_HALF_WIDTH } from '../data/castle';
 import { isStunned, moveMultiplier } from './status';
+import { stepFlyer } from './flyers';
 
 /** Owned by [enemies-waves]. Enemy spawning + AI.
  *  - Melee/boss: march down their spawn lane toward the outermost intact wall and batter it;
  *    divert to nearby field-level defender units (allies sortieing out).
  *  - Ranged: advance until a defender unit is in bow range and shoot it (arrows arc up to
  *    walls; projectiles ignore walls — accepted v1); with nothing to shoot, chip the wall.
+ *  - Flyers (isFlyerDef, any defId in data/enemies.ts's FLYER_AI — hot air balloon, dragon):
+ *    ignore walls and the above entirely, dispatched to sim/flyers.ts's stepFlyer() instead.
+ *    See that file's header for the full flight/attack model and design rationale.
  *  Sim-only: no rendering, no Math.random() (game.rng only). */
 
 export interface SpawnMods {
@@ -236,15 +240,17 @@ function stepRanged(
   }
 }
 
-/** Gentle pairwise push-apart so enemies don't stack (single pass, positional). */
+/** Gentle pairwise push-apart so enemies don't stack (single pass, positional). Flyers are
+ *  excluded on either side of the pair — there's no 3D separation model here, and an airborne
+ *  flyer overlapping a ground unit's XZ footprint isn't actually touching it (see sim/flyers.ts). */
 function separate(list: SimEnemy[]): void {
   const n = list.length;
   for (let i = 0; i < n; i++) {
     const a = list[i];
-    if (!a.alive) continue;
+    if (!a.alive || isFlyerDef(a.defId)) continue;
     for (let j = i + 1; j < n; j++) {
       const b = list[j];
-      if (!b.alive) continue;
+      if (!b.alive || isFlyerDef(b.defId)) continue;
       let dx = b.pos.x - a.pos.x;
       let dz = b.pos.z - a.pos.z;
       const minD = a.radius + b.radius;
@@ -303,16 +309,21 @@ export function initEnemies(game: GameState): void {
       const wall = game.castle.outermostIntactWall();
       const list = game.enemies as SimEnemy[];
       for (const e of list) {
-        // Stunned enemies do nothing at all — no marching, no attacks, no wall damage.
+        // Stunned enemies do nothing at all — no marching, no attacks, no wall damage. Flyers
+        // included: a stunned flyer just hovers in place (see sim/flyers.ts's file header).
         if (isStunned(e, game)) continue;
-        if (e.def.behavior === 'ranged') stepRanged(e, dt, game, wall, defenders, vels);
+        if (isFlyerDef(e.defId)) stepFlyer(e, dt, game);
+        else if (e.def.behavior === 'ranged') stepRanged(e, dt, game, wall, defenders, vels);
         else stepMelee(e, dt, game, wall, defenders);
       }
 
       separate(list);
 
-      // final clamps + walk on the terrain height (0 on field, crosses rubble)
+      // final clamps + walk on the terrain height (0 on field, crosses rubble) — ground-walkers
+      // only. Flyers own their entire position update inside stepFlyer and must never be
+      // snapped to worldHeight (the walking-unit ground clamp) or stopped short of the wall face.
       for (const e of list) {
+        if (isFlyerDef(e.defId)) continue;
         e.pos.x = Math.min(Math.max(e.pos.x, FIELD_MIN_X + e.radius), FIELD_MAX_X - e.radius);
         e.pos.z = Math.max(e.pos.z, ENEMY_SPAWN_Z - 2);
         if (wall) e.pos.z = Math.min(e.pos.z, wall.z - e.radius - ENEMY_AI.wallStopGap);

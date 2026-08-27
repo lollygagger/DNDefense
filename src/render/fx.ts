@@ -2,13 +2,21 @@ import * as THREE from 'three';
 import type { GameState } from '../sim/GameState';
 import type { Impact } from '../sim/projectiles';
 import { R } from './scene';
+import { spawnBeam, updateBeams } from './aerialBeam';
 
 /** Owned by [ability-fx] (was FROZEN). Reads sim state, never mutates it. Instanced projectile
- *  rendering (by `kind`), particle bursts, expanding rings, and lingering ground fields.
- *  `spawnBurst`/`spawnRing` are a stable contract (enemyView/allyView use them for death fx) —
- *  original positional signatures unchanged; new behavior is opt-in via a trailing options
- *  object. Cosmetic Math.random() is fine here. */
-
+ *  rendering (by `kind`), particle bursts, expanding rings, lingering ground fields, and (via
+ *  aerialBeam.ts) short ground-to-sky beams. `spawnBurst`/`spawnRing` are a stable contract
+ *  (enemyView/allyView use them for death fx) — original positional signatures unchanged; new
+ *  behavior is opt-in via a trailing options object. Cosmetic Math.random() is fine here.
+ *
+ *  HOSTILE VS. FRIENDLY COLOR CONVENTION. The player's own effects own clean, single-family
+ *  hues with no dark tones: Fireball is warm orange/gold, Arcane Bolt is violet, Frost is icy
+ *  blue. Enemy-originated attacks (currently: the flying enemies' bomb/breath, sim/flyers.ts)
+ *  are deliberately "dirty" instead — every one pairs an off-palette hue (never orange, violet,
+ *  or icy blue) with genuine black/charcoal smoke or soot, a visual element the player's own
+ *  effects never use. That's the rule for any future enemy attack: smoke + an off-palette hue
+ *  means "this is being done to you," not "you did this." */
 // ---------- In-flight projectile look (silhouette + motion, not just tint) ----------
 
 interface ProjectileStyle {
@@ -30,6 +38,15 @@ const PROJECTILE_STYLES: Record<string, ProjectileStyle> = {
   ballista: { shape: 'spike', color: 0xffb347, size: 0.32, glow: true, glowColor: 0xffcf8a, trail: true, spin: 6 },
   arrow: { shape: 'arrow', color: 0x9a9a8a, size: 0.15, spin: 4 },
   fireball: { shape: 'orb', color: 0xff6a2a, size: 0.55, glow: true, glowColor: 0xffb14a, trail: true },
+  // Hot air balloon's bomb telegraph (sim/flyers.ts spawns this as a harmless real projectile,
+  // ahead of the real detonation, purely so the player sees it coming). Dark powder-keg body;
+  // the `trail`'s glow streaks backward along travel — for a straight vertical drop that's
+  // *upward*, toward the balloon, so the falling bomb visibly reads as tethered to its source.
+  bombFall: { shape: 'orb', color: 0x2b2924, size: 0.4, glow: true, glowColor: 0xff9a3a, trail: true, spin: 5 },
+  // Crossbow's Cannon branch: a big, dull iron ball. Deliberately heavy and un-glowy — its
+  // whole identity is a slow shot you have to lead, so it should look like a thrown weight
+  // rather than a bolt. Large size sells the mass; the lazy spin sells the slow travel.
+  cannonball: { shape: 'orb', color: 0x3f4247, size: 0.5, spin: 3 },
 };
 const FALLBACK_STYLE: ProjectileStyle = { shape: 'orb', color: 0xffffff, size: 0.25 };
 
@@ -254,12 +271,61 @@ const IMPACT_EFFECTS: Record<string, ImpactFn> = {
   arrow: (imp) => {
     spawnBurst(imp.pos, 0x9a9a8a, 7, 4.5, 0.28, { upMin: 0.05, upMax: 0.45, gravity: 24, size: 0.2 });
   },
+  // Cannon splash: a heavy earth-and-iron thump. Slow, low, weighty particles rather than a
+  // bright flash — this is a mass impact, not an explosion. Ring uses the shell's real splash
+  // radius (published from aoeRadius), so the indicator can't disagree with what it damaged.
+  cannonball: (imp) => {
+    spawnBurst(imp.pos, 0x6b6257, 24, 7, 0.5, { upMin: 0.2, upMax: 0.8, gravity: 26, size: 0.36 });
+    spawnBurst(imp.pos, 0x2f2d2a, 10, 3.5, 0.55, { upMin: 0.4, upMax: 1, gravity: 6, size: 0.45 });
+    if (imp.radius) spawnRing(imp.pos, imp.radius, 0x8a7f6d, 0.4);
+  },
+  // Flamethrower cone tick: a low, rolling wash of fire. Short-lived and repeated (the tower
+  // pulses this while burning), so it stays cheap and reads as continuous flame rather than a
+  // series of discrete hits. Its lingering field is sized from the tower's real cone reach.
+  flame: (imp) => {
+    spawnBurst(imp.pos, 0xff7a1e, 14, 5, 0.3, { upMin: 0.3, upMax: 1, gravity: -2, size: 0.44 });
+    spawnBurst(imp.pos, 0xffd66b, 6, 3, 0.22, { upMin: 0.4, upMax: 1.1, gravity: -4, size: 0.3 });
+    if (imp.radius) spawnField(imp.pos, imp.radius, 0xff6a2a, imp.duration ?? 0.4);
+  },
+  // Arc lightning: a hard, instantaneous white-hot spark. No ring and no lingering anything —
+  // the chain's readability comes from several of these popping in sequence across the targets
+  // it jumped between, which is exactly the information the player wants.
+  lightning: (imp) => {
+    spawnBurst(imp.pos, 0xeaf4ff, 12, 11, 0.16, { upMin: 0.2, upMax: 1.1, gravity: 0, size: 0.26 });
+    spawnBurst(imp.pos, 0x66c2ff, 8, 7, 0.24, { upMin: 0.1, upMax: 0.9, gravity: 4, size: 0.32 });
+  },
   // Fireball: two-tone detonation + a ring sized to the real blast radius for the caster's rank.
   fireball: (imp, game) => {
     const { radius } = rankVisual(game, 'fireball', imp);
     spawnBurst(imp.pos, 0xff6a2a, 26, 10, 0.6, { upMin: 0.3, upMax: 1.1, size: 0.42 });
     spawnBurst(imp.pos, 0xffe27a, 12, 5, 0.3, { upMin: 0.4, upMax: 1, gravity: 6, size: 0.5 });
     spawnRing(imp.pos, radius, 0xff8a3a, 0.5);
+  },
+  // Balloon bomb's own quiet ground-touch (the harmless falling prop from sim/flyers.ts landing
+  // slightly before/after the real blast) — a small dust thud, deliberately unshowy so it never
+  // competes with the real 'bombBlast' explosion.
+  bombFall: (imp) => {
+    spawnBurst(imp.pos, 0x8a8578, 6, 3, 0.2, { upMin: 0.05, upMax: 0.3, gravity: 20, size: 0.18 });
+  },
+  // Hot air balloon's bomb: black powder-smoke + a sickly toxic-green flash, sized to the real
+  // blast radius (sim/flyers.ts). Deliberately not fire-colored — reads as a lobbed explosive,
+  // not a spell — and the black smoke marks it hostile per this file's color convention.
+  bombBlast: (imp) => {
+    const radius = imp.radius ?? 4;
+    spawnBurst(imp.pos, 0x2a2722, 22, 6, 0.55, { upMin: 0.3, upMax: 0.85, gravity: 5, size: 0.42 });
+    spawnBurst(imp.pos, 0xc7e05a, 16, 9, 0.35, { upMin: 0.2, upMax: 0.8, size: 0.34 });
+    spawnRing(imp.pos, radius, 0x8a9a3a, 0.45);
+  },
+  // Dragon breath: crimson fire + black soot (never Fireball's clean orange/gold), a scorch ring
+  // at the real breath radius, and a beam connecting the dragon's real dive-bottom altitude
+  // (imp.originY, sim/flyers.ts) down to the ground point it hit — so the source overhead is
+  // never ambiguous, unlike an explosion floating with nothing visibly causing it.
+  dragonBreath: (imp) => {
+    const radius = imp.radius ?? 3;
+    spawnBurst(imp.pos, 0xff4d2e, 20, 8, 0.4, { upMin: 0.25, upMax: 0.9, size: 0.4 });
+    spawnBurst(imp.pos, 0x241f1c, 10, 4, 0.45, { upMin: 0.3, upMax: 0.7, gravity: 4, size: 0.32 });
+    spawnRing(imp.pos, radius, 0xb8202a, 0.4);
+    if (imp.originY !== undefined) spawnBeam(imp.pos, imp.originY, radius, 0xd8402a, 0.22);
   },
   // Frost Field (aoe) gets a lingering field at the real radius/duration; Pinning Shot (single
   // target, same kind) just gets a small snowflake burst on the enemy it hit.
@@ -307,6 +373,14 @@ const IMPACT_EFFECTS: Record<string, ImpactFn> = {
   // Second Wind: slow-rising warm motes around the caster — a heal glow, not a combat impact.
   secondWind: (imp) => {
     spawnBurst(imp.pos, 0xff8fa3, 14, 2.2, 0.7, { upMin: 0.8, upMax: 1.3, gravity: -2, size: 0.3 });
+  },
+  // Bulwark (Tank): a brief brass/gold shield flare, not a lingering field — the ability itself
+  // is a self-buff with no gameplay radius to size a ring from, so this is a fixed "moment" flash
+  // exactly like Blink/Grapple's, not a faked AoE indicator. Warm metallic gold reads as "shield"
+  // and is deliberately distinct from Second Wind's pink (healing) and from any damage look.
+  bulwark: (imp) => {
+    spawnBurst(imp.pos, 0xe0c060, 16, 4.5, 0.4, { upMin: 0.15, upMax: 0.6, gravity: -1, size: 0.3 });
+    spawnRing(imp.pos, 1.6, 0xf0d878, 0.35);
   },
 };
 
@@ -477,6 +551,9 @@ export function initFx(game: GameState): void {
         const pulse = 0.55 + Math.sin(elapsed * 3) * 0.12;
         (f.rim.material as THREE.MeshBasicMaterial).opacity = pulse * opacityMul;
       }
+
+      // Beams (dragon breath's ground-to-sky connector) — own cap/lifecycle in aerialBeam.ts.
+      updateBeams(dt);
     },
   });
 }

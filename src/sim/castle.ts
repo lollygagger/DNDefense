@@ -3,17 +3,32 @@ import type { GameState } from './GameState';
 import type { CastleApi, Socket, StructureInstance, Wall, WallTier } from './types';
 import { getStructureDef } from './structures';
 import {
+  BAND_BACK_Z,
+  BAND_FRONT_Z,
+  bandHitScratch,
+  battlementHeightAt,
+  bodyHeightAt,
+  checkBand,
+  isMerlonX,
+  MERLON_TOP,
+  PARAPET_TOP,
+} from './castleBlocking';
+import { findLadderAt, type LadderInfo } from './ladders';
+import {
+  extraSocketSpecFor,
+  tickWallEffects,
+  wallDamageReductionPct as reductionPctFor,
+  wallMerlonBonus as merlonBonusFor,
+  WALL_UPGRADE_TREE,
+  type ExtraSocketSpec,
+} from './wallUpgrades';
+import {
   CHAMBER_BUILDING_OFFSET,
   CHAMBER_DOOR_FRONT_OFFSET,
   CHAMBER_XS,
   EMBRASURE_MUZZLE_FRONT_OFFSET,
   EMBRASURE_MUZZLE_HEIGHT_FRAC,
   EMBRASURE_XS,
-  MERLON_DEPTH,
-  MERLON_HEIGHT,
-  MERLON_SPACING,
-  MERLON_WIDTH,
-  PARAPET_HEIGHT,
   REPAIR_COST_PER_HP,
   STAIR_HALF_WIDTH,
   STAIR_LENGTH,
@@ -27,122 +42,74 @@ import {
 } from '../data/castle';
 
 /** Owned by [world-castle]. Sim model of the castle: walls, HP, sockets, walkable heights,
- *  build/repair/structure APIs. The exported init/API signatures are contract — internals are yours. */
+ *  build/repair/structure APIs. The exported init/API signatures are contract — internals are
+ *  yours. Projectile-blocking geometry primitives live in sim/castleBlocking.ts and the wall
+ *  upgrade tree/effects in sim/wallUpgrades.ts — both split out to keep this file under the
+ *  ~400-line guideline (see each file's header for why). */
 
-// ---- Projectile-blocking geometry ----------------------------------------------------------
-// Mirrors the cosmetic mesh layout in render/castleView.ts exactly (same constants, same local
-// z placement) so what the player sees is what actually stops arrows. The parapet/merlon band
-// sits in front of the wall body, at wall-relative z in [BAND_FRONT_Z, BAND_BACK_Z] (matches
-// castleView's parapet/merlon local z = MERLON_DEPTH / 2 - 0.2, +/- half depth). Behind that
-// band, only the plain wall body (relative z in [BAND_BACK_Z, WALL_THICKNESS], height
-// WALL_HEIGHT) is solid — the open-air space above the walkable top in the middle of the wall's
-// thickness blocks nothing (matches the real geometry: no floating stone back there).
-const BAND_FRONT_Z = -0.2;
-const BAND_BACK_Z = MERLON_DEPTH - 0.2; // 0.5
-const PARAPET_TOP = WALL_HEIGHT + PARAPET_HEIGHT; // 6.4 — continuous, full width, no gaps
-const MERLON_TOP = PARAPET_TOP + MERLON_HEIGHT; // 8.2 — only within a merlon's x-footprint
-const MERLON_GAP_HALF = (MERLON_SPACING - MERLON_WIDTH) / 2; // 1.2 — half the crenel gap width
-
-/** True if x falls inside a merlon's footprint rather than a crenel gap. Crenel gaps repeat
- *  every MERLON_SPACING, centered on every multiple of it (0, ±MERLON_SPACING, ±2*MERLON_SPACING,
- *  ...) — by construction (render/castleView.ts always builds an even number of merlons,
- *  symmetric about x=0), so with MERLON_SPACING=4 a gap centers exactly on x=0 and x=±12 (the
- *  embrasure sockets). See docs/ARCHITECTURE.md for the full arithmetic. */
-function isMerlonX(x: number): boolean {
-  const nearestGapCenter = Math.round(x / MERLON_SPACING) * MERLON_SPACING;
-  return Math.abs(x - nearestGapCenter) > MERLON_GAP_HALF;
+/** Builds one embrasure socket at wall-relative x, for either the initial 3 or a purchased
+ *  extra one (sim/wallUpgrades.ts's West/East Bastion nodes) — identical geometry either way. */
+function makeEmbrasureSocket(tier: WallTier, z: number, x: number, index: number): Socket {
+  return {
+    id: `w${tier}-e${index}`,
+    kind: 'embrasure',
+    tier,
+    localX: x,
+    // interaction anchor on the wall top
+    worldPos: new Vector3(x, WALL_HEIGHT, z + WALL_THICKNESS / 2),
+    // bolts fire from the front face, above mid height
+    muzzlePos: new Vector3(x, WALL_HEIGHT * EMBRASURE_MUZZLE_HEIGHT_FRAC, z - EMBRASURE_MUZZLE_FRONT_OFFSET),
+    structure: null,
+  };
 }
 
-function battlementHeightAt(x: number): number {
-  if (Math.abs(x) > WALL_HALF_WIDTH) return 0;
-  return isMerlonX(x) ? MERLON_TOP : PARAPET_TOP;
-}
-
-function bodyHeightAt(x: number): number {
-  return Math.abs(x) > WALL_HALF_WIDTH ? 0 : WALL_HEIGHT;
-}
-
-// Scratch vector for blocksProjectile's internal band checks. Reused every call (never
-// allocated) — safe because it's written then immediately read before any other call can run
-// (single-threaded, no re-entrancy).
-const bandHitScratch = new Vector3();
-
-/** Swept check within one wall-relative z-band [zLo, zHi]: does the segment
- *  (x0,y0,z0)->(x0+dx,y0+dy,z0+dz) dip at/below `heightAt(x)` anywhere its z lies in that band?
- *  Writes the entry point (wall-relative z) into `out` and returns true if so. `heightAt` is a
- *  plain function reference (not a closure) so this allocates nothing. */
-function checkBand(
-  x0: number,
-  y0: number,
-  z0: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  zLo: number,
-  zHi: number,
-  heightAt: (x: number) => number,
-  out: Vector3
-): boolean {
-  let tA: number;
-  let tB: number;
-  if (dz === 0) {
-    if (z0 < zLo || z0 > zHi) return false;
-    tA = 0;
-    tB = 1;
-  } else {
-    const t1 = (zLo - z0) / dz;
-    const t2 = (zHi - z0) / dz;
-    tA = Math.max(0, Math.min(t1, t2));
-    tB = Math.min(1, Math.max(t1, t2));
-    if (tA > tB) return false;
-  }
-  const xA = x0 + dx * tA;
-  const xB = x0 + dx * tB;
-  const yA = y0 + dy * tA;
-  const yB = y0 + dy * tB;
-  const h = heightAt((xA + xB) / 2);
-  if (h <= 0 || Math.min(yA, yB) > h) return false;
-  out.set(xA, Math.min(yA, h), z0 + dz * tA);
-  return true;
+/** Builds one chamber socket at wall-relative x, for either the initial 2 or a purchased extra
+ *  one (sim/wallUpgrades.ts's West/East Annex nodes) — identical geometry either way. */
+function makeChamberSocket(tier: WallTier, z: number, x: number, index: number): Socket {
+  return {
+    id: `w${tier}-c${index}`,
+    kind: 'chamber',
+    tier,
+    // interaction anchor + barracks building position: on the ground, in the courtyard
+    // BEHIND the wall (not on the wall top — that's the whole point of moving it), through
+    // a cosmetic archway at the wall's back face. See CHAMBER_BUILDING_OFFSET's comment.
+    worldPos: new Vector3(x, 0, z + WALL_THICKNESS + CHAMBER_BUILDING_OFFSET),
+    // allies still sortie out at the front base of the wall, through the matching archway on
+    // the front face — muzzlePos keeps its exact prior meaning/formula, untouched by the
+    // building move, so allies keep emerging in front of the wall to fight.
+    muzzlePos: new Vector3(x, 0, z - CHAMBER_DOOR_FRONT_OFFSET),
+    localX: x,
+    structure: null,
+  };
 }
 
 function makeSockets(tier: WallTier, z: number): Socket[] {
   const sockets: Socket[] = [];
-  EMBRASURE_XS.forEach((x, i) => {
-    sockets.push({
-      id: `w${tier}-e${i}`,
-      kind: 'embrasure',
-      tier,
-      localX: x,
-      // interaction anchor on the wall top
-      worldPos: new Vector3(x, WALL_HEIGHT, z + WALL_THICKNESS / 2),
-      // bolts fire from the front face, above mid height
-      muzzlePos: new Vector3(x, WALL_HEIGHT * EMBRASURE_MUZZLE_HEIGHT_FRAC, z - EMBRASURE_MUZZLE_FRONT_OFFSET),
-      structure: null,
-    });
-  });
-  CHAMBER_XS.forEach((x, i) => {
-    sockets.push({
-      id: `w${tier}-c${i}`,
-      kind: 'chamber',
-      tier,
-      // interaction anchor + barracks building position: on the ground, in the courtyard
-      // BEHIND the wall (not on the wall top — that's the whole point of moving it), through
-      // a cosmetic archway at the wall's back face. See CHAMBER_BUILDING_OFFSET's comment.
-      worldPos: new Vector3(x, 0, z + WALL_THICKNESS + CHAMBER_BUILDING_OFFSET),
-      // allies still sortie out at the front base of the wall, through the matching archway on
-      // the front face — muzzlePos keeps its exact prior meaning/formula, untouched by the
-      // building move, so allies keep emerging in front of the wall to fight.
-      muzzlePos: new Vector3(x, 0, z - CHAMBER_DOOR_FRONT_OFFSET),
-      localX: x,
-      structure: null,
-    });
-  });
+  EMBRASURE_XS.forEach((x, i) => sockets.push(makeEmbrasureSocket(tier, z, x, i)));
+  CHAMBER_XS.forEach((x, i) => sockets.push(makeChamberSocket(tier, z, x, i)));
   return sockets;
+}
+
+/** Builds the Socket a purchased expansion node (West/East Bastion/Annex) unlocks. See
+ *  sim/wallUpgrades.ts's extraSocketSpecFor for the id -> kind/x/index mapping. */
+function makeExtraSocket(tier: WallTier, z: number, spec: ExtraSocketSpec): Socket {
+  return spec.kind === 'embrasure'
+    ? makeEmbrasureSocket(tier, z, spec.x, spec.index)
+    : makeChamberSocket(tier, z, spec.x, spec.index);
 }
 
 class Castle implements CastleApi {
   walls: Wall[];
+
+  // Per-wall purchased wall-upgrade ids (sim/wallUpgrades.ts's WALL_UPGRADE_TREE). Wall
+  // (sim/types.ts) is FROZEN and has no room for this field, so it lives here instead, keyed on
+  // the Wall object itself — the same "adapter code in your own module" shape blocksProjectile
+  // already uses to extend CastleApi without touching the frozen contract.
+  private wallPurchasedMap = new WeakMap<Wall, string[]>();
+  // Per-wall battlement-height function for blocksProjectile, cached so the hot per-tick path
+  // never allocates a closure — only rebuilt on construction and after a successful upgradeWall()
+  // (a rare, menu-click-driven event, not a tick). Index matches `this.walls` (tier 1..3 -> 0..2).
+  private battlementFns: ((x: number) => number)[] = [];
 
   constructor(private game: GameState) {
     this.walls = ([1, 2, 3] as WallTier[]).map((tier) => ({
@@ -154,6 +121,29 @@ class Castle implements CastleApi {
       cost: WALL_COST[tier],
       sockets: makeSockets(tier, WALL_Z[tier]),
     }));
+    for (const w of this.walls) this.wallPurchasedMap.set(w, []);
+    this.rebuildBattlementFns();
+  }
+
+  /** Live (not copied) purchased-id list for a wall — internal use only (damageWall,
+   *  blocksProjectile's rebuild, upgradeWall). External callers get wallPurchased() instead,
+   *  which copies, so nothing outside this class can mutate the source list. */
+  private purchasedFor(w: Wall): string[] {
+    return this.wallPurchasedMap.get(w) ?? [];
+  }
+
+  /** Rebuilds the cached per-wall battlement-height closures from each wall's current Higher
+   *  Battlements rank. Only called on construction and right after a successful upgradeWall() —
+   *  cheap (at most 3 tiny closures) and keeps blocksProjectile's hot path allocation-free. */
+  private rebuildBattlementFns(): void {
+    this.battlementFns = this.walls.map((w) => {
+      const bonus = merlonBonusFor(this.purchasedFor(w));
+      if (bonus === 0) return battlementHeightAt; // common case: reuse the shared fn, no allocation
+      return (x: number) => {
+        if (Math.abs(x) > WALL_HALF_WIDTH) return 0;
+        return isMerlonX(x) ? MERLON_TOP + bonus : PARAPET_TOP; // only merlons grow; the parapet lip doesn't
+      };
+    });
   }
 
   outermostIntactWall(): Wall | null {
@@ -204,8 +194,11 @@ class Castle implements CastleApi {
       const hiZ = Math.max(z0, z0 + dz);
       if (hiZ < BAND_FRONT_Z || loZ > WALL_THICKNESS) continue; // step never enters this wall
 
+      // Higher Battlements (per-wall) only affects the parapet/merlon band's height function;
+      // the plain wall-body band is identical for every wall regardless of upgrades.
+      const battlementFn = this.battlementFns[w.tier - 1];
       if (
-        checkBand(from.x, from.y, z0, dx, dy, dz, BAND_FRONT_Z, BAND_BACK_Z, battlementHeightAt, bandHitScratch) ||
+        checkBand(from.x, from.y, z0, dx, dy, dz, BAND_FRONT_Z, BAND_BACK_Z, battlementFn, bandHitScratch) ||
         checkBand(from.x, from.y, z0, dx, dy, dz, BAND_BACK_Z, WALL_THICKNESS, bodyHeightAt, bandHitScratch)
       ) {
         outHit.set(bandHitScratch.x, bandHitScratch.y, bandHitScratch.z + w.z);
@@ -213,6 +206,15 @@ class Castle implements CastleApi {
       }
     }
     return false;
+  }
+
+  /** Ladder query. Not part of the frozen CastleApi (types.ts) — same reasoning as
+   *  blocksProjectile/wallMerlonBonus above; player/controller.ts reads it through its own
+   *  narrow local interface + cast. Delegates entirely to sim/ladders.ts's findLadderAt, which
+   *  is what actually owns the geometry and the front-ladder combat-phase gate — this is just
+   *  the wiring that hands it this castle's live wall list and current phase. */
+  ladderAt(x: number, y: number, z: number): LadderInfo | null {
+    return findLadderAt(this.walls, this.game.phase, x, y, z);
   }
 
   canBuildWall(tier: WallTier): boolean {
@@ -247,7 +249,11 @@ class Castle implements CastleApi {
   damageWall(tier: WallTier, amount: number, game: GameState): void {
     const w = this.walls[tier - 1];
     if (!w.built || w.hp <= 0) return;
-    w.hp -= amount;
+    // Reinforced Stone/Masoned Core: flat % resistance, applied uniformly here so every damage
+    // source (melee/ranged wallDps, flyer siege bursts) benefits the same way with no changes
+    // needed at any call site.
+    const reduction = reductionPctFor(this.purchasedFor(w));
+    w.hp -= amount * (1 - reduction);
     game.events.emit('wall:damaged', { tier });
     if (w.hp > 0) return;
 
@@ -302,6 +308,54 @@ class Castle implements CastleApi {
     return true;
   }
 
+  /** Read-only copy of a wall's purchased upgrade ids (sim/wallUpgrades.ts's WALL_UPGRADE_TREE),
+   *  for ui/menus.ts to render. Not part of the frozen CastleApi — see this class's doc comments
+   *  on blocksProjectile for why; ui/menus.ts reads it through its own narrow local interface. */
+  wallPurchased(tier: WallTier): string[] {
+    return [...this.purchasedFor(this.walls[tier - 1])];
+  }
+
+  /** Current Higher Battlements merlon-height bonus for a wall (0 if not purchased). Not part of
+   *  the frozen CastleApi; render/castleView.ts reads it through its own narrow local interface
+   *  so its merlon meshes match exactly what blocksProjectile is actually checking against. */
+  wallMerlonBonus(tier: WallTier): number {
+    return merlonBonusFor(this.purchasedFor(this.walls[tier - 1]));
+  }
+
+  /** Purchase one node of a wall's upgrade tree (sim/wallUpgrades.ts's WALL_UPGRADE_TREE) —
+   *  the wall-level analogue of upgradeStructure(). Same validation shape (owned/requires/
+   *  excludes) plus one extra step: an expansion node (West/East Bastion/Annex) also pushes a
+   *  brand-new Socket onto the wall, built from its pre-vetted geometry (extraSocketSpecFor) —
+   *  the id is permanently unique/stable (continues that kind's existing index sequence) so it
+   *  can never collide with, or invalidate, an already-installed structure's socketId. Not part
+   *  of the frozen CastleApi; ui/menus.ts reads it through its own narrow local interface. */
+  upgradeWall(tier: WallTier, nodeId: string): boolean {
+    const w = this.walls[tier - 1];
+    if (!w.built || w.hp <= 0) return false;
+    const node = WALL_UPGRADE_TREE.find((n) => n.id === nodeId);
+    if (!node) return false;
+    const purchased = this.purchasedFor(w);
+    if (purchased.includes(nodeId)) return false;
+    if (node.requires && !purchased.includes(node.requires)) return false;
+    for (const ownedId of purchased) {
+      const owned = WALL_UPGRADE_TREE.find((n) => n.id === ownedId);
+      if (owned?.excludes?.includes(nodeId)) return false;
+      if (node.excludes?.includes(ownedId)) return false;
+    }
+    if (!this.game.trySpend(node.cost)) return false;
+    purchased.push(nodeId);
+    const spec = extraSocketSpecFor(nodeId);
+    if (spec) w.sockets.push(makeExtraSocket(w.tier, w.z, spec));
+    this.rebuildBattlementFns(); // cheap; only Higher Battlements nodes actually change the result
+    return true;
+  }
+
+  /** Drives the two GameState-mutating fortification effects (auto-repair, machicolations) —
+   *  see sim/wallUpgrades.ts's tickWallEffects. Called every tick from initCastle's system. */
+  tickUpgradeEffects(dt: number, game: GameState): void {
+    tickWallEffects(dt, game, this.walls, (w) => this.purchasedFor(w));
+  }
+
   getSocketById(id: string): Socket | null {
     for (const w of this.walls) {
       const s = w.sockets.find((s) => s.id === id);
@@ -330,4 +384,9 @@ class Castle implements CastleApi {
 export function initCastle(game: GameState): void {
   const castle = new Castle(game);
   game.castle = castle;
+  game.addSystem({
+    tick(dt) {
+      castle.tickUpgradeEffects(dt, game);
+    },
+  });
 }

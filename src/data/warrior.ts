@@ -166,6 +166,13 @@ const leap: AbilityDef = {
     { cost: 40, stats: { speed: 5.5, damage: 30 } },
     { cost: 80, stats: { speed: 6.5, damage: 40 } },
     { cost: 140, stats: { speed: 7.5, damage: 55, radius: 3 } },
+    // Rank V (late-game gold sink, unlocks behaviour): "Seismic Leap" — pure scaling first,
+    // per the roadmap's "scales, eventually gaining a stun" ask. Bigger blast, still no CC.
+    { cost: 220, stats: { speed: 8.2, damage: 75, radius: 3.4 } },
+    // Rank VI: "Earthshaker" — the landing slam now stuns too. 1.3s stun on Leap's 5s cooldown
+    // is a real but bounded ~26% uptime if you keep leaping onto the same spot — a flinch, not
+    // a lock — and the radius (4) is cluster-sized, not wave-sized.
+    { cost: 320, stats: { speed: 8.8, damage: 95, radius: 4, stunDuration: 1.3 } },
   ],
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {
     // Horizontal-only facing direction (matches controller.ts's forward basis at strafe=0), so
@@ -184,13 +191,18 @@ const leap: AbilityDef = {
         if (!e.alive) continue;
         const dx = e.pos.x - caster.pos.x;
         const dz = e.pos.z - caster.pos.z;
-        if (dx * dx + dz * dz <= stats.radius * stats.radius) e.takeDamage(stats.damage, game);
+        if (dx * dx + dz * dz <= stats.radius * stats.radius) {
+          e.takeDamage(stats.damage, game);
+          // Absent below rank VI — old behaviour (damage-only landing) is unchanged.
+          if (stats.stunDuration) applyStun(e, game, stats.stunDuration);
+        }
       }
       game.projectiles.impacts.push({
         pos: caster.pos.clone(),
         kind: 'leap',
         aoe: true,
         radius: stats.radius,
+        duration: stats.stunDuration,
       });
     });
   },

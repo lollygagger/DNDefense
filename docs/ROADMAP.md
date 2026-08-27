@@ -18,7 +18,7 @@ These unblock large parts of the roadmap, so they land before the content that n
   an `AllyDef` (melee / ranged / caster / support behaviours) is what makes five new spawners
   data instead of five new code paths.
 
-## Phase 1 — in progress
+## Phase 1 — ✅ complete
 
 - 🚧 Flying enemies: **hot air balloon** (slow, tanky, drifts over walls) and **dragon** (fast,
   strafing, breath attack). Waves updated to introduce them.
@@ -34,6 +34,14 @@ These unblock large parts of the roadmap, so they land before the content that n
 
 ## Phase 2 — next
 
+- ⬜ **Deliberate anti-air targeting.** Crossbows currently hit flyers *by coincidence* — their
+  target search has no height gate and their aim solution happens to be 3D. That works, but it
+  isn't a decision. Give structures an explicit "can this hit air?" property so anti-air is a
+  build choice the player makes, and so a future ground-only tower can't accidentally snipe
+  dragons. Related: crossbow targeting only considers `pos.z < wall.z`, which is why flyers are
+  parked in front of the keep rather than over it.
+- ⬜ **Distinct FX for aerial attacks** — balloon bombs and dragon breath currently reuse the
+  Fireball impact look. They read fine but should be their own thing.
 - ⬜ **Flamethrower tower** — short range, wide AoE that grows substantially with level.
 - ⬜ **Crossbow third path**: keep Rapid, extend **Ballista** (range + damage + pierce), add
   **Cannon** (big slow projectile, heavy splash). Three mutually exclusive identities.
@@ -42,10 +50,13 @@ These unblock large parts of the roadmap, so they land before the content that n
   long, so a rich player has somewhere to put the gold.
 - ⬜ **Deeper wall upgrades** — walls as an upgrade tree, not just HP to repair.
 
-## Phase 3 — later
+## Phase 3 — in progress
 
-- ⬜ **Ladders**: permanent ladders at the back of each wall; front-face ladders that are only
+- 🚧 **Ladders**: permanent ladders at the back of each wall; front-face ladders that are only
   usable between waves. Needs a climbing movement mode in the controller.
+- 🚧 **All allies deploy to the forwardmost wall**, not just melee. Ranged/caster form up behind
+  the melee line, support behind them — an army that moves to the front together, rather than
+  archers idling at the keep while the fight is two walls forward.
 - ⬜ More enemy variety aimed at *new player decisions* (something that punishes clumping,
   something that outranges you, something that forces you off a wall).
 - ⬜ Co-op multiplayer (the sim has been kept refactorable for it throughout — see

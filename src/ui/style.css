@@ -736,6 +736,18 @@ body {
   color: #d3f0c3;
 }
 
+/* Section label inside a drill-down menu screen (e.g. the castle menu's per-wall Fortifications
+ * / Expand the Wall groups) — a lighter-weight version of screens.ts's .section-heading, sized
+ * for the narrower menu-panel context. */
+.menu-subheading {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
 #socket-hint {
   position: fixed;
   left: 50%;

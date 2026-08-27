@@ -1,117 +1,32 @@
 import type { GameState } from '../sim/GameState';
-import type {
-  Socket,
-  StructureDef,
-  StructureInstance,
-  UpgradeNode,
-  Wall,
-  WallTier,
-} from '../sim/types';
+import type { Socket, WallTier } from '../sim/types';
 import { getStructureDef, getStructureDefsForSocket } from '../sim/structures';
 import { allAbilities, buyAbilityRank, getAbilityStats, nextRankCost } from '../sim/classes';
+import { WALL_UPGRADE_TREE } from '../sim/wallUpgrades';
 import { anyOverlayOpen, escapeHtml, overlayClosed, overlayOpened } from './hud';
+import { renderCastleMenu as renderCastleMenuHtml } from './castleMenu';
+import { branchColumns, costBtn, fmtStats, nodeState, panel, structureIcon, upgradeNodeHtml, WALL_NAMES } from './menuWidgets';
 
 /** Owned by [ui]. The three in-game menus (mutually exclusive):
  *  E = socket build/upgrade, B = castle walls, Tab = class upgrades. Esc closes.
- *  Reads sim state + calls sim APIs only — never mutates state directly. */
+ *  Reads sim state + calls sim APIs only — never mutates state directly. Shared rendering
+ *  widgets (panel chrome, upgrade-tree columns, stat formatting) live in ui/menuWidgets.ts; the
+ *  castle menu's own wall-upgrade-tree rendering lives in ui/castleMenu.ts — both split out to
+ *  keep this file under the ~400-line guideline once the wall upgrade tree landed. */
+
+/** Non-frozen wall-upgrade extension of CastleApi, read via a narrow local interface + cast —
+ *  the same pattern sim/projectiles.ts uses for blocksProjectile (see docs/ARCHITECTURE.md).
+ *  Wall (sim/types.ts) is FROZEN and has no room for a per-wall purchased-upgrade list, so
+ *  sim/castle.ts keeps it internally and exposes just this call (ui/castleMenu.ts declares its
+ *  own copy for the read-only half it needs — see that file's comment). */
+interface WallUpgradable {
+  upgradeWall(tier: WallTier, nodeId: string): boolean;
+}
 
 const SOCKET_RANGE = 6;
 const MENU_REFRESH_S = 0.25; // live re-render cadence while a menu is open (HP bars etc.)
 
 type MenuId = 'socket' | 'castle' | 'class';
-
-const WALL_NAMES: Record<WallTier, string> = {
-  1: 'Outer Wall',
-  2: 'Middle Wall',
-  3: 'The Keep',
-};
-
-type NodeState = 'owned' | 'available' | 'locked-requires' | 'locked-excluded';
-
-function nodeState(def: StructureDef, inst: StructureInstance, node: UpgradeNode): NodeState {
-  if (inst.purchased.includes(node.id)) return 'owned';
-  for (const ownedId of inst.purchased) {
-    const owned = def.upgrades.find((n) => n.id === ownedId);
-    if (owned?.excludes?.includes(node.id)) return 'locked-excluded';
-    if (node.excludes?.includes(ownedId)) return 'locked-excluded';
-  }
-  if (node.requires && !inst.purchased.includes(node.requires)) return 'locked-requires';
-  return 'available';
-}
-
-/** Lay the upgrade tree out as columns: each requires-chain from a root node becomes a
- *  column, so exclusive branches (crossbow rapid vs ballista) sit side by side. */
-function branchColumns(def: StructureDef): UpgradeNode[][] {
-  const cols: UpgradeNode[][] = [];
-  const placed = new Set<string>();
-  for (const root of def.upgrades.filter((n) => n.requires === null)) {
-    const col: UpgradeNode[] = [root];
-    placed.add(root.id);
-    let cur: UpgradeNode = root;
-    for (;;) {
-      const next = def.upgrades.find((n) => n.requires === cur.id && !placed.has(n.id));
-      if (!next) break;
-      col.push(next);
-      placed.add(next.id);
-      cur = next;
-    }
-    cols.push(col);
-  }
-  const rest = def.upgrades.filter((n) => !placed.has(n.id));
-  if (rest.length > 0) cols.push(rest);
-  return cols;
-}
-
-function structureIcon(def: StructureDef): string {
-  return def.socketKind === 'embrasure' ? '🏹' : '🛡️';
-}
-
-const STAT_LABELS: Record<string, string> = {
-  damage: 'Damage',
-  speed: 'Speed',
-  radius: 'Radius',
-  slowPct: 'Slow',
-  duration: 'Duration',
-  range: 'Range',
-  arcDeg: 'Arc',
-  pierce: 'Pierces',
-  heal: 'Heal',
-};
-
-function fmtStatVal(key: string, v: number): string {
-  if (key === 'slowPct') return `${v}%`;
-  if (key === 'duration') return `${v}s`;
-  if (key === 'arcDeg') return `${v}°`;
-  return String(v);
-}
-
-function fmtStats(stats: Record<string, number>): string {
-  return Object.entries(stats)
-    .map(([k, v]) => `${escapeHtml(STAT_LABELS[k] ?? k)} ${fmtStatVal(k, v)}`)
-    .join(' · ');
-}
-
-function bar(hp: number, maxHp: number): string {
-  const pct = Math.max(0, Math.min(1, hp / maxHp)) * 100;
-  const cls = pct > 60 ? 'ok' : pct > 25 ? 'warn' : 'low';
-  return `<div class="bar wall-bar"><div class="bar-fill ${cls}" style="width:${pct.toFixed(1)}%"></div>
-    <div class="bar-text">${Math.ceil(hp)} / ${maxHp}</div></div>`;
-}
-
-function panel(title: string, body: string): string {
-  return `<div class="menu-backdrop" data-action="close"></div>
-    <div class="menu-panel">
-      <div class="menu-title"><span>${title}</span><button class="btn btn-close" data-action="close">✕</button></div>
-      <div class="menu-body">${body}</div>
-      <div class="menu-foot">Esc to close</div>
-    </div>`;
-}
-
-function costBtn(action: string, arg: string, label: string, cost: number, gold: number): string {
-  const cant = gold < cost;
-  return `<button class="btn${cant ? ' disabled' : ''}" data-action="${action}" data-arg="${arg}"
-    ${cant ? `title="Not enough gold"` : ''}>${label} · ${cost}💰</button>`;
-}
 
 export function initMenus(game: GameState): void {
   const ui = document.getElementById('ui')!;
@@ -125,6 +40,8 @@ export function initMenus(game: GameState): void {
 
   let open: MenuId | null = null;
   let socketId: string | null = null;
+  // Which wall (if any) the castle menu has drilled into — see the "castle menu" section below.
+  let castleWallFocus: WallTier | null = null;
   let lastRefresh = 0;
 
   const toast = (text: string): void => game.events.emit('ui:toast', { text });
@@ -135,6 +52,7 @@ export function initMenus(game: GameState): void {
     if (open === null) return;
     open = null;
     socketId = null;
+    castleWallFocus = null;
     root.style.display = 'none';
     root.innerHTML = '';
     overlayClosed('menu');
@@ -204,7 +122,7 @@ export function initMenus(game: GameState): void {
     const cols = branchColumns(def)
       .map(
         (col) =>
-          `<div class="upgrade-col">${col.map((n) => upgradeNodeHtml(def, inst, n)).join('')}</div>`
+          `<div class="upgrade-col">${col.map((n) => upgradeNodeHtml(def, inst, n, 'upgrade-structure', game.gold)).join('')}</div>`
       )
       .join('');
     const body = `<div class="row-desc">${escapeHtml(def.desc)}</div>
@@ -212,62 +130,15 @@ export function initMenus(game: GameState): void {
     return panel(`${structureIcon(def)} ${escapeHtml(def.name)} — ${WALL_NAMES[socket.tier]}`, body);
   }
 
-  function upgradeNodeHtml(def: StructureDef, inst: StructureInstance, n: UpgradeNode): string {
-    const state = nodeState(def, inst, n);
-    const name = escapeHtml(n.name);
-    const desc = escapeHtml(n.desc);
-    if (state === 'available') {
-      return `<div class="upgrade-node available">
-        <div class="row-name">${name}</div><div class="row-desc">${desc}</div>
-        ${costBtn('upgrade-structure', n.id, 'Upgrade', n.cost, game.gold)}
-      </div>`;
-    }
-    const badge =
-      state === 'owned'
-        ? `<div class="node-badge owned">✅ Owned</div>`
-        : state === 'locked-requires'
-          ? `<div class="node-badge">🔒 Requires ${escapeHtml(
-              def.upgrades.find((u) => u.id === n.requires)?.name ?? 'previous upgrade'
-            )}</div>`
-          : `<div class="node-badge">🚫 Other path chosen</div>`;
-    return `<div class="upgrade-node ${state === 'owned' ? 'owned' : 'locked'}">
-      <div class="row-name">${name}</div><div class="row-desc">${desc}</div>${badge}
-    </div>`;
-  }
-
   // ---------- castle menu ----------
+  // Rendering (wall list + the "Fortify ▸" drill-down into one wall's upgrade tree) lives in
+  // ui/castleMenu.ts; this module just owns the open/close/focus state and wires it in, exactly
+  // like every other menu here.
 
   function renderCastleMenu(): string {
-    const rows = game.castle.walls.map((w) => wallRowHtml(w)).join('');
-    return panel('🏰 Castle Walls', rows);
-  }
-
-  function wallRowHtml(w: Wall): string {
-    const name = `${WALL_NAMES[w.tier]} <span class="row-sub">(Tier ${w.tier})</span>`;
-    if (!w.built) {
-      return `<div class="menu-row">
-        <div class="row-main">
-          <div class="row-name">🧱 ${name}</div>
-          <div class="row-desc">Rubble — enemies pass freely until rebuilt.</div>
-        </div>
-        ${costBtn('build-wall', String(w.tier), 'Build', w.cost, game.gold)}
-      </div>`;
-    }
-    const cost = game.castle.repairCost(w.tier);
-    const full = w.hp >= w.maxHp;
-    const note =
-      w.tier === 3 ? `<div class="row-desc danger">💀 If the Keep falls, the run ends.</div>` : '';
-    const repairBtn = full
-      ? `<button class="btn disabled">Repair · —</button>`
-      : costBtn('repair-wall', String(w.tier), 'Repair', cost, game.gold);
-    return `<div class="menu-row">
-      <div class="row-main">
-        <div class="row-name">🏯 ${name}</div>
-        ${bar(w.hp, w.maxHp)}
-        ${note}
-      </div>
-      ${repairBtn}
-    </div>`;
+    const result = renderCastleMenuHtml(game, castleWallFocus);
+    castleWallFocus = result.focus;
+    return result.html;
   }
 
   // ---------- class menu ----------
@@ -377,6 +248,27 @@ export function initMenus(game: GameState): void {
           () => game.castle.repairWall(tier),
           `${WALL_NAMES[tier]} repaired! 🔧`,
           `Nothing to repair.`
+        );
+        break;
+      }
+      case 'focus-wall': {
+        castleWallFocus = Number(arg) as WallTier;
+        break;
+      }
+      case 'unfocus-wall': {
+        castleWallFocus = null;
+        break;
+      }
+      case 'upgrade-wall': {
+        if (castleWallFocus === null) break;
+        const tier = castleWallFocus;
+        const node = WALL_UPGRADE_TREE.find((n) => n.id === arg);
+        if (!node) break;
+        trySpendAction(
+          node.cost,
+          () => (game.castle as unknown as WallUpgradable).upgradeWall(tier, arg),
+          `${node.name} built! 🏗️`,
+          `Upgrade unavailable.`
         );
         break;
       }
