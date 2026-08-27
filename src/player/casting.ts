@@ -1,0 +1,404 @@
+import * as THREE from 'three';
+import type { GameState } from '../sim/GameState';
+import type { AbilityDef, PlayerState } from '../sim/types';
+import { getAbilityDef, getAbilityStats, tryCast } from '../sim/classes';
+import { R } from '../render/scene';
+import { isMenuOpen, setMoveSpeedMultiplier } from './controller';
+import { actionState } from './actionState';
+
+/** Owned by [player-classes]. Input → cast commands: LMB fires the primary along the camera
+ *  ray; ability keys (2..9, generically classDef.abilities[key-2]) arm ground-targeted
+ *  abilities and show a ring reticle where the crosshair meets the ground, or cast
+ *  'aimed'-targeting hotkey abilities immediately. LMB confirms / RMB or Esc cancels.
+ *  Sim-boundary rule: this file only ever talks to the sim through tryCast(); it never
+ *  mutates enemies/walls/units directly.
+ *
+ *  Two extra input shapes live here on top of that base flow:
+ *   - Ground-targeted `role: 'mobility'` abilities (the grapple hook) still use the normal
+ *     arm/preview/confirm reticle flow — same as an AoE spell — but the confirm click requires
+ *     the raymarch to have actually found walkable ground/wall-top within range (not the
+ *     "aiming at the sky" flattened fallback every other ground ability tolerates); missing
+ *     that is a miss (toast + red flash, no cooldown burned, tryCast never called).
+ *   - A primary with a `charge` descriptor (the archer's bow) turns LMB into hold-to-draw:
+ *     mousedown starts a draw, `actionState.charge01`/`chargingId` are driven live every
+ *     render frame while held, and mouseup looses it — tryCast (and thus the cooldown) only
+ *     fires on release, with the drawn fraction passed through as a charge amount. The draw
+ *     cancels cleanly (no shot, actionState reset) the instant `canAct()` goes false for any
+ *     reason — menu opened, death, phase change, lost pointer lock. */
+
+const RETICLE_COLORS: Record<string, number> = {
+  fireball: 0xff6a2a,
+  frostField: 0x7fd8ff,
+  blink: 0xc86bff,
+  groundSlam: 0xe08a3c, // warrior: bronze/steel
+  leap: 0xe08a3c,
+  grapple: 0x3ea373, // archer: bow-gem teal
+};
+const RETICLE_DEFAULT_COLOR = 0xd6c9ff;
+const FLASH_COLOR = 0xff3344;
+const DEFAULT_CAST_RANGE = 45;
+const GROUND_STEP = 0.5;
+const REFINE_ITERS = 8;
+const FLASH_DURATION = 0.35;
+
+// Scratch vectors reused every frame/click to avoid per-call allocation churn.
+const tmpEye = new THREE.Vector3();
+const tmpDir = new THREE.Vector3();
+const tmpPoint = new THREE.Vector3();
+
+/** March the camera ray forward in fixed steps until it dips below the walkable ground
+ *  height, then binary-refine the crossing. If the ray never meets the ground within
+ *  maxRange (e.g. aiming at the sky), fall back to a flattened point at maxRange.
+ *  `hitFlag`, if given, is set true when a real crossing was found and false on the
+ *  fallback — most callers (AoE placement) don't care and omit it; a caller that needs a
+ *  *real* anchor (the grapple hook) reads it to reject the fallback as "nothing in range". */
+function raymarchGround(
+  game: GameState,
+  origin: THREE.Vector3,
+  dir: THREE.Vector3,
+  maxRange: number,
+  out: THREE.Vector3,
+  hitFlag?: { hit: boolean }
+): THREE.Vector3 {
+  const steps = Math.max(1, Math.ceil(maxRange / GROUND_STEP));
+  let prevT = 0;
+  let t = 0;
+  for (let i = 1; i <= steps; i++) {
+    t = Math.min(i * GROUND_STEP, maxRange);
+    const px = origin.x + dir.x * t;
+    const py = origin.y + dir.y * t;
+    const pz = origin.z + dir.z * t;
+    const ground = game.castle.worldHeight(px, pz);
+    if (py <= ground) {
+      let lo = prevT;
+      let hi = t;
+      for (let k = 0; k < REFINE_ITERS; k++) {
+        const mid = (lo + hi) / 2;
+        const mx = origin.x + dir.x * mid;
+        const my = origin.y + dir.y * mid;
+        const mz = origin.z + dir.z * mid;
+        const g = game.castle.worldHeight(mx, mz);
+        if (my <= g) hi = mid;
+        else lo = mid;
+      }
+      const fx = origin.x + dir.x * hi;
+      const fz = origin.z + dir.z * hi;
+      out.set(fx, game.castle.worldHeight(fx, fz), fz);
+      if (hitFlag) hitFlag.hit = true;
+      return out;
+    }
+    prevT = t;
+  }
+  // No ground hit within range (aiming above the horizon) — flatten at max range.
+  const fx = origin.x + dir.x * maxRange;
+  const fz = origin.z + dir.z * maxRange;
+  out.set(fx, game.castle.worldHeight(fx, fz), fz);
+  if (hitFlag) hitFlag.hit = false;
+  return out;
+}
+
+function clampToPlayerRange(
+  game: GameState,
+  point: THREE.Vector3,
+  playerPos: THREE.Vector3,
+  range: number
+): void {
+  const dx = point.x - playerPos.x;
+  const dz = point.z - playerPos.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist > range && dist > 0) {
+    const s = range / dist;
+    point.x = playerPos.x + dx * s;
+    point.z = playerPos.z + dz * s;
+    point.y = game.castle.worldHeight(point.x, point.z);
+  }
+}
+
+/** Ground-target range for the caster's *current rank* of an ability: a rank's stats may
+ *  override the ability's base castRange (e.g. Blink's teleport distance grows with rank) —
+ *  fall back to the static castRange, then the global default, when a rank has no override.
+ *  Generic: any ground-target ability can opt into per-rank range simply by putting a
+ *  `range` stat in its rank data; nothing here is ability-specific. */
+function groundRangeFor(player: PlayerState, def: AbilityDef): number {
+  const stats = getAbilityStats(player, def.id);
+  return stats.range ?? def.castRange ?? DEFAULT_CAST_RANGE;
+}
+
+/** Where the crosshair currently meets the ground, clamped to the ability's cast range.
+ *  `hitFlag` is forwarded to raymarchGround verbatim — see its doc comment. */
+function computeGroundPoint(
+  game: GameState,
+  player: PlayerState,
+  range: number,
+  out: THREE.Vector3,
+  hitFlag?: { hit: boolean }
+): THREE.Vector3 {
+  const eye = R.camera.getWorldPosition(tmpEye);
+  const dir = R.camera.getWorldDirection(tmpDir);
+  raymarchGround(game, eye, dir, range, out, hitFlag);
+  clampToPlayerRange(game, out, player.pos, range);
+  return out;
+}
+
+function buildReticle(): {
+  ring: THREE.Mesh;
+  dot: THREE.Mesh;
+  ringMat: THREE.MeshBasicMaterial;
+  dotMat: THREE.MeshBasicMaterial;
+} {
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: RETICLE_DEFAULT_COLOR,
+    transparent: true,
+    opacity: 0.7,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 48), ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
+  ring.renderOrder = 5;
+
+  const dotMat = new THREE.MeshBasicMaterial({
+    color: RETICLE_DEFAULT_COLOR,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.14, 16), dotMat);
+  dot.rotation.x = -Math.PI / 2;
+  dot.visible = false;
+  dot.renderOrder = 5;
+
+  R.scene.add(ring, dot);
+  return { ring, dot, ringMat, dotMat };
+}
+
+export function initCasting(game: GameState): void {
+  const { ring, dot, ringMat, dotMat } = buildReticle();
+
+  let armed: string | null = null;
+  let flashId: string | null = null;
+  let flashUntil = 0;
+
+  // Hold-to-draw state for a primary with a `charge` descriptor (see types.ts). Only ever the
+  // local player's primary ability id, but kept generic (id, not a boolean) so nothing here
+  // hardcodes "archer"/"quickshot" — any future charge-primary class gets this for free.
+  let drawingId: string | null = null;
+  let drawStart = 0;
+
+  const disarm = (): void => {
+    armed = null;
+  };
+
+  /** Ground-ability arm/cast attempts get explicit feedback (toast + red reticle flash) since
+   *  nothing else would otherwise indicate why the hotkey did nothing. The rapid-fire primary
+   *  (LMB) deliberately does NOT nag on every over-click — its cooldown ring on the HUD ability
+   *  bar is feedback enough. */
+  const castFail = (def: AbilityDef, text: string): void => {
+    game.events.emit('ui:toast', { text });
+    flashId = def.id;
+    flashUntil = game.time + FLASH_DURATION;
+  };
+  const notReady = (def: AbilityDef): void => castFail(def, `${def.name} not ready`);
+
+  /** End a hold-to-draw in progress, for any reason (release, cancel, interruption) — resets
+   *  every bit of presentation state a draw touches so nothing lingers: the viewmodel's bow pose
+   *  (chargingId/charge01) and the move-speed penalty. Idempotent: safe to call when nothing is
+   *  being drawn. Does NOT fire a shot — callers that mean to fire do that separately, using the
+   *  drawingId/drawStart snapshot *before* calling this. */
+  const endDraw = (): void => {
+    if (drawingId === null) return;
+    drawingId = null;
+    actionState.chargingId = null;
+    actionState.charge01 = 0;
+    setMoveSpeedMultiplier(1);
+  };
+
+  const canAct = (): boolean => {
+    const p = game.localPlayer;
+    return (
+      !!p &&
+      p.alive &&
+      !isMenuOpen() &&
+      (game.phase === 'build' || game.phase === 'combat') &&
+      document.pointerLockElement === R.renderer.domElement
+    );
+  };
+
+  function castAimed(player: PlayerState, def: AbilityDef): boolean {
+    const eye = R.camera.getWorldPosition(tmpEye).clone();
+    const dir = R.camera.getWorldDirection(tmpDir);
+    const range = def.castRange ?? 60;
+    const aim = eye.clone().addScaledVector(dir, range);
+    return tryCast(game, player, def.id, eye, aim);
+  }
+
+  // ---------- mouse: LMB confirms/casts, RMB cancels ----------
+  window.addEventListener('mousedown', (e) => {
+    if (e.button === 2) {
+      if (armed !== null) disarm();
+      return;
+    }
+    if (e.button !== 0) return;
+    if (!canAct()) return;
+    const player = game.localPlayer!;
+
+    if (armed !== null) {
+      const def = getAbilityDef(player.classDef, armed);
+      disarm();
+      if (!def) return;
+      const range = groundRangeFor(player, def);
+      const hit = { hit: false };
+      const point = computeGroundPoint(game, player, range, tmpPoint, hit).clone();
+      // role:'mobility' ground abilities (the grapple hook) need a *real* walkable anchor —
+      // the "aiming at the sky" flattened fallback every other ground ability tolerates isn't
+      // a valid hookshot target. Reject it as a miss: no cooldown burned (tryCast never runs).
+      if (def.role === 'mobility' && !hit.hit) {
+        castFail(def, `No anchor in range for ${def.name}`);
+        return;
+      }
+      const eye = R.camera.getWorldPosition(tmpEye).clone();
+      const ok = tryCast(game, player, def.id, eye, point);
+      if (!ok) notReady(def);
+      return;
+    }
+
+    const def = player.classDef.primary;
+    if ((player.cooldowns[def.id] ?? 0) > game.time) return; // silent: HUD cooldown ring already shows this
+
+    if (def.charge) {
+      // Hold-to-draw: mousedown only starts the draw. tryCast (and its cooldown) fires on
+      // release — see the mouseup listener below.
+      drawingId = def.id;
+      drawStart = game.time;
+      actionState.chargingId = def.id;
+      actionState.charge01 = 0;
+      setMoveSpeedMultiplier(def.charge.moveSpeedMult ?? 1);
+      return;
+    }
+
+    castAimed(player, def);
+  });
+
+  // ---------- mouse: release a hold-to-draw primary ----------
+  window.addEventListener('mouseup', (e) => {
+    if (e.button !== 0 || drawingId === null) return;
+    const player = game.localPlayer;
+    const def = player ? getAbilityDef(player.classDef, drawingId) : null;
+    const charge = def?.charge;
+    const heldFor = game.time - drawStart;
+    endDraw(); // reset presentation state regardless of what happens next
+    if (!player || !def || !charge) return;
+    if (!canAct()) return; // menu opened / died / phase changed / lost pointer lock mid-draw: cancel, no shot
+
+    const raw01 = Math.min(1, Math.max(0, heldFor / charge.drawTime));
+    // Floored at minRelease so a snap-release still looses a real (if weak) shot, never a
+    // literal zero — see types.ts's charge doc comment.
+    const chargeFraction = charge.minRelease + (1 - charge.minRelease) * raw01;
+    const eye = R.camera.getWorldPosition(tmpEye).clone();
+    const dir = R.camera.getWorldDirection(tmpDir);
+    const range = def.castRange ?? 60;
+    const aim = eye.clone().addScaledVector(dir, range);
+    const ok = tryCast(game, player, def.id, eye, aim, chargeFraction);
+    if (ok) actionState.releasedAt = game.time;
+  });
+
+  // Prevent the browser's right-click context menu from popping mid-game.
+  window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---------- ability hotkeys 2..9 -> classDef.abilities[key-2] ----------
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') {
+      if (armed !== null) disarm();
+      return;
+    }
+    const m = /^Digit([2-9])$/.exec(e.code);
+    if (!m) return;
+    if (!canAct()) return;
+    const player = game.localPlayer!;
+    const idx = Number(m[1]) - 2;
+    const def = player.classDef.abilities[idx];
+    if (!def) return;
+
+    if (armed === def.id) {
+      disarm(); // pressing the armed ability's own key again cancels it
+      return;
+    }
+    if ((player.cooldowns[def.id] ?? 0) > game.time) {
+      notReady(def);
+      return;
+    }
+    if (def.targeting === 'ground') {
+      armed = def.id;
+    } else {
+      castAimed(player, def); // aimed ability on a hotkey slot: cast immediately, no arming
+    }
+  });
+
+  // ---------- disarm / cancel-draw triggers ----------
+  game.events.on('player:died', () => {
+    disarm();
+    endDraw();
+  });
+  game.events.on('phase:changed', ({ phase }) => {
+    if (phase === 'gameover') disarm();
+    endDraw(); // any phase change (build<->combat too) cancels an in-progress draw
+  });
+
+  // ---------- reticle render + live draw state ----------
+  game.addSystem({
+    render() {
+      // A UI menu/screen opening (E/B/Tab/start) always wins: drop any armed targeting.
+      if (isMenuOpen() && armed !== null) disarm();
+
+      // Drive charge01 live every frame so the viewmodel's draw pose is accurate every frame
+      // (per the task note), and cancel the draw the instant canAct() goes false for any
+      // reason not already covered by an explicit event above (menu open, lost pointer lock).
+      if (drawingId !== null) {
+        if (!canAct()) {
+          endDraw();
+        } else {
+          const player = game.localPlayer;
+          const def = player ? getAbilityDef(player.classDef, drawingId) : null;
+          if (def?.charge) {
+            actionState.charge01 = Math.min(1, Math.max(0, (game.time - drawStart) / def.charge.drawTime));
+          }
+        }
+      }
+
+      const player = game.localPlayer;
+      const flashing = flashId !== null && game.time < flashUntil;
+      const activeId = armed ?? (flashing ? flashId : null);
+      const def = player && activeId ? getAbilityDef(player.classDef, activeId) : null;
+
+      if (!player || !player.alive || !def) {
+        ring.visible = false;
+        dot.visible = false;
+        return;
+      }
+
+      const range = groundRangeFor(player, def);
+      const point = computeGroundPoint(game, player, range, tmpPoint);
+      ring.visible = true;
+      dot.visible = true;
+      ring.position.set(point.x, point.y + 0.05, point.z);
+      dot.position.copy(ring.position);
+
+      const stats = getAbilityStats(player, def.id);
+      // Mobility abilities (Blink) reposition the caster rather than affecting an area —
+      // show a small fixed marker instead of an AoE-radius ring so it doesn't imply a blast.
+      const radius = def.role === 'mobility' ? 0.6 : Math.max(0.4, stats.radius ?? 4);
+      const t = game.time;
+      const pulse = 1 + Math.sin(t * 6) * 0.06;
+      ring.scale.setScalar(radius * pulse);
+
+      const isFlashingThis = flashing && activeId === flashId;
+      const color = isFlashingThis ? FLASH_COLOR : (RETICLE_COLORS[def.id] ?? RETICLE_DEFAULT_COLOR);
+      ringMat.color.setHex(color);
+      dotMat.color.setHex(color);
+      ringMat.opacity = isFlashingThis ? 0.85 : 0.55 + Math.sin(t * 6) * 0.15;
+      dotMat.opacity = 0.9;
+    },
+  });
+}
