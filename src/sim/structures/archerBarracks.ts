@@ -42,11 +42,32 @@ const cfg: SpawnerConfig = {
         ? ARCHER_BARRACKS.upgrades.volley1.fireRateMult
         : 1;
 
+    // High tier (600g/1600g, independent of marksman1/2/volley1/2 — a second, separate branch
+    // point): Broadhead Arrows (pierce) vs Explosive Fletching (splash via aoeRadius), mutually
+    // exclusive. Threaded through the projectile spec in sim/allyAI.ts's fireAt.
+    const pierce2 = purchased.includes('broadheadArrows2');
+    const pierce1 = purchased.includes('broadheadArrows1');
+    const pierce = pierce2
+      ? ARCHER_BARRACKS.upgrades.broadheadArrows2.pierce
+      : pierce1
+        ? ARCHER_BARRACKS.upgrades.broadheadArrows1.pierce
+        : undefined;
+
+    const splash2 = purchased.includes('explosiveFletching2');
+    const splash1 = purchased.includes('explosiveFletching1');
+    const aoeRadius = splash2
+      ? ARCHER_BARRACKS.upgrades.explosiveFletching2.aoeRadius
+      : splash1
+        ? ARCHER_BARRACKS.upgrades.explosiveFletching1.aoeRadius
+        : undefined;
+
     return {
       damage: base.damage * damageMult,
       attackRange: base.attackRange + rangeBonus,
       aggroRange: base.aggroRange + rangeBonus,
       attackInterval: base.attackInterval / fireRateMult,
+      pierce,
+      aoeRadius,
     };
   },
 };
@@ -87,6 +108,39 @@ export const archerBarracksDef: StructureDef = {
       desc: '+2 max archers (total), +60% fire rate (total).',
       cost: ARCHER_BARRACKS.upgrades.volley2.cost,
       requires: 'volley1',
+    },
+    // ---- High tier: a second, independent branch point, not gated behind marksman/volley (same
+    // "not gated behind the cheap tier" precedent ability Mastery uses) — pierce a line vs splash
+    // a cluster, the same shape of decision as the crossbow's own Ballista-vs-Cannon split.
+    {
+      id: 'broadheadArrows1',
+      name: 'Broadhead Arrows',
+      desc: 'Arrows punch through: pierces 1 extra enemy in the line, same full damage on both.',
+      cost: ARCHER_BARRACKS.upgrades.broadheadArrows1.cost,
+      requires: null,
+      excludes: ['explosiveFletching1'],
+    },
+    {
+      id: 'broadheadArrows2',
+      name: 'Piercing Volley',
+      desc: 'Pierces 2 extra enemies (total) — a well-aimed volley clears a whole lane.',
+      cost: ARCHER_BARRACKS.upgrades.broadheadArrows2.cost,
+      requires: 'broadheadArrows1',
+    },
+    {
+      id: 'explosiveFletching1',
+      name: 'Explosive Fletching',
+      desc: 'Arrows detonate on impact: 2.0-radius splash damage instead of a single-target hit.',
+      cost: ARCHER_BARRACKS.upgrades.explosiveFletching1.cost,
+      requires: null,
+      excludes: ['broadheadArrows1'],
+    },
+    {
+      id: 'explosiveFletching2',
+      name: 'Detonating Volley',
+      desc: '3.0-radius splash (total) — a volley that clears whatever’s clustered at the wall.',
+      cost: ARCHER_BARRACKS.upgrades.explosiveFletching2.cost,
+      requires: 'explosiveFletching1',
     },
   ] satisfies UpgradeNode[],
   create(socket: Socket, game: GameState): StructureInstance {

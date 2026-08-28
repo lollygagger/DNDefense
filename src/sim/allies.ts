@@ -1,10 +1,16 @@
 import { Vector3 } from 'three';
 import type { GameState } from './GameState';
-import { allocId, type Unit, type Wall, type WallTier } from './types';
+import { allocId, type Enemy, type Unit, type Wall, type WallTier } from './types';
 import { isStunned } from './status';
-import { ALLY_BOUNDS } from '../data/allies';
+import {
+  ALLY_BOUNDS,
+  ARMY_RALLY_LOOKAHEAD,
+  ARMY_RALLY_MAX_X,
+  ARMY_RALLY_SMOOTHING,
+} from '../data/allies';
 import { WALL_THICKNESS } from '../data/castle';
 import { separateAllies, stepMelee, stepRangedOrCaster, stepSupport } from './allyAI';
+import { pulseThornsIfReady, tryMedicSave } from './allyTierEffects';
 
 /** Owned by [structures-allies]. Generic ally AI: every spawner structure (armory, archer
  *  barracks, mage tower, tank barracks, field hospital) produces a `Unit` carrying a fully
@@ -36,16 +42,12 @@ import { separateAllies, stepMelee, stepRangedOrCaster, stepSupport } from './al
  *   - The one real hazard is lateral: two DIFFERENT structures (e.g. a tier-1 and a tier-3
  *     archer barracks, both at chamber x = -6) re-anchoring to the same front wall would
  *     otherwise compute the *identical* guard post for their "slot 0" units and pile them on
- *     each other — and this now applies to every reanchoring behavior, not just melee, since
- *     spawners of any kind can sit on any of the three tiers. `guardPostFor` avoids this with a
- *     small per-tier lateral band (`TIER_LATERAL_BAND`) baked into `guardX` at spawn, so squads
- *     from different tiers form adjacent parallel lines at the new front instead of stacking —
- *     on top of the existing per-ally `separateAllies()` push-apart (sim/allyAI.ts), which still
- *     runs every tick as a last-resort safety net. Because the band is keyed on (socketX,
- *     homeTier) alone, it separates same-behavior squads from different tiers exactly the same
- *     way regardless of which behavior they are — melee, ranged, caster, and medic squads from
- *     three different walls' spawners all converging on one front line each get their own
- *     lateral slot without any behavior-specific casing.
+ *     each other. That is now solved by forming ONE army rather than many squads: every tick,
+ *     `rebuildFormation()` hands each reanchoring ally a slot in a single shared line per rank,
+ *     centred on where the fighting actually is, so spawners on all three tiers contribute to the
+ *     same shield wall / archer rank instead of each holding a private stretch of wall. The
+ *     per-ally `separateAllies()` push-apart (sim/allyAI.ts) still runs every tick as a
+ *     last-resort safety net.
  *  Engineer is the only behavior that does NOT reanchor — see ALLY_DEFS in data/allies.ts for why.
  *
  *  ---- Flying enemies (added after this module; see sim/flyers.ts) ----
@@ -68,6 +70,12 @@ export interface AllyDef {
   hp: number;
   damage: number; // melee hit / ranged-caster projectile damage; 0 (unused) for support
   speed: number;
+  /** Speed multiplier used ONLY while walking back to the formation post with no target, never
+   *  while chasing or fighting. A tank is meant to be slow in a brawl, but one `speed` field was
+   *  governing both brawling and forming up, so the slowest unit in the army also lost every
+   *  race to its own line — the tank rank ended up BEHIND the swordsmen it is supposed to screen.
+   *  Defaults to 1 (identical behaviour) for anything that doesn't set it. */
+  formUpSpeedMult?: number;
   radius: number;
   height: number;
 
@@ -106,8 +114,55 @@ export interface AllyDef {
   supportKind?: SupportKind;
   healAmount?: number; // medic: hp restored per action, to each eligible unit
   healInterval?: number;
-  healRange?: number; // medic: radius around the medic's OWN position counted as "nearby"
+  healRange?: number;
+  /** Medic only: how far from its formation post it will chase a wounded ally. The leash that
+   *  keeps a medic near the army instead of following one straggler across the map. */
+  followRange?: number;
+  /** Medic only: how close it closes to the ally it's treating. Keeps it tucked beside the
+   *  wounded rather than shoving into the front rank. */
+  healStandoff?: number;
   repairRate?: number; // engineer: home-wall hp/sec restored while stationed, combat phase only
+
+  // ---- High-tier spawner upgrades (600g/1600g, see each sim/structures/*.ts for the node
+  // definitions and data/structures.ts for the numbers). Behavioral, not stat multipliers —
+  // deliberately never touch hp/damage/speed directly, unlike the cheap tier below them. ----
+
+  // Swordsman Armory — Bleeding Strikes (applied in stepMelee via sim/abilityEffects.ts's
+  // applyBleed) vs Sundering Blows (applyVulnerability), mutually exclusive.
+  bleedDpsPerStack?: number;
+  bleedDuration?: number;
+  bleedMaxStacks?: number;
+  markVulnPct?: number;
+  markVulnDuration?: number;
+
+  // Archer Barracks — Broadhead Arrows (pierce, threaded into the projectile spec in fireAt)
+  // vs Explosive Fletching (reuses aoeRadius above), mutually exclusive.
+  pierce?: number;
+
+  // Mage Tower — Arcane Residue (a lingering damage zone via spawnGroundEffect, fired from
+  // fireAt's onImpact) vs Twin Casting (an extra bolt at a second target, stepRangedOrCaster),
+  // mutually exclusive.
+  lingerDps?: number;
+  lingerDuration?: number;
+  lingerRadius?: number;
+  extraBoltCount?: number;
+  extraBoltDamageMult?: number;
+
+  // Tank Barracks — Retaliation Plating (a retaliation pulse on taking damage, see spawnAlly's
+  // takeDamage) vs Hardened Resolve (heal-on-hit, stepMelee), mutually exclusive.
+  thornsDamage?: number;
+  thornsRadius?: number;
+  healOnHit?: number;
+
+  // Field Hospital — Guardian's Grace (medic only: save an ally from a killing blow, see
+  // tryMedicSave below) and Emergency Patching (engineer only: a once-per-wave wall-hp burst,
+  // see stepEngineer in sim/allyAI.ts) — independent of each other, not mutually exclusive (see
+  // FIELD_HOSPITAL's doc comment in data/structures.ts for why this one building differs).
+  reviveRange?: number;
+  reviveHpFrac?: number;
+  reviveCooldown?: number;
+  emergencyThresholdPct?: number;
+  emergencyPatchPct?: number;
 }
 
 /** Concrete ally unit. Everything in game.allies is one of these; render code may read the
@@ -121,6 +176,8 @@ export interface AllyUnit extends Unit {
   nextAttackAt: number; // game.time when it may attack/shoot again
   nextActionAt: number; // game.time when a support ally may next act (heal pulse)
   targetId: number | null; // id of the enemy currently engaged/tracked, or null when idle
+  nextThornsAt: number; // Tank Barracks' Retaliation Plating: game.time when it may pulse again
+  nextReviveAt: number; // Field Hospital's Guardian's Grace: game.time this MEDIC may save again
 }
 
 /** Lateral slot offsets within one structure's own battle line: slot 0 is dead center on the
@@ -133,12 +190,10 @@ function lineSlotOffset(slot: number, spacing: number): number {
   return sign * step * spacing;
 }
 
-/** Extra lateral shift applied per home wall tier, only for allies that reanchor to the front.
- *  Keeps a tier-3 armory's squad from landing exactly on top of a tier-1 armory's squad (same
- *  chamber x, -6 or +6) when both end up forming on the same front wall — see the module doc
- *  comment. 0 for a tier-1 structure (the common case is completely unaffected), so nothing
- *  changes until a wall actually falls and a further-back squad gets redirected. */
-const TIER_LATERAL_BAND = 3;
+/** Lateral slot spacing is per-behaviour (see AllyDef.lineSpacing). Squads no longer get a
+ *  per-tier lateral band: every reanchoring ally's guardX is recomputed each tick as part of ONE
+ *  shared army formation (see rebuildFormation below), so a tier-3 armory's swordsmen fall in on
+ *  the same shield wall as a tier-1 armory's rather than holding a private stretch of wall. */
 
 /** The z half of a guard post against `wall`, honoring `lineSide` — 'front' sits `lineDistance`
  *  out from the wall's front face (into the field), 'back' sits `lineDistance` INTO the
@@ -163,12 +218,56 @@ export function guardPostFor(
   socketX: number,
   slot: number,
 ): { x: number; z: number } {
-  const band = def.reanchorToFront
-    ? socketX + Math.sign(socketX || 1) * (homeTier - 1) * TIER_LATERAL_BAND
-    : socketX;
-  const x = band + lineSlotOffset(slot, def.lineSpacing);
+  // Reanchoring allies get this only as a spawn-frame placeholder — rebuildFormation() below
+  // overwrites their guardX on the very next tick with their slot in the shared army line.
+  const x = socketX + lineSlotOffset(slot, def.lineSpacing);
   const z = guardZFor(def, wall);
   return { x, z };
+}
+
+/** Where the army should mass right now: the average x of the enemies that actually matter —
+ *  those at or near the front wall — eased toward, so the line drifts rather than twitching as
+ *  enemies die. Falls back to the wall's centre when nothing is engaged yet.
+ *
+ *  This is what makes the army concentrate on the fight instead of holding assigned patches of
+ *  wall. Module-level smoothing state (deterministic under command replay, same pattern as the
+ *  wave scheduler's) rather than GameState, which is frozen. */
+let rallyX = 0;
+
+function updateRally(game: GameState, frontWall: Wall): void {
+  let sum = 0;
+  let n = 0;
+  for (const e of game.enemies) {
+    if (!e.alive) continue;
+    if (e.pos.z < frontWall.z - ARMY_RALLY_LOOKAHEAD) continue; // still marching in, not the fight yet
+    sum += e.pos.x;
+    n += 1;
+  }
+  const target = n === 0 ? 0 : Math.max(-ARMY_RALLY_MAX_X, Math.min(ARMY_RALLY_MAX_X, sum / n));
+  rallyX += (target - rallyX) * ARMY_RALLY_SMOOTHING;
+}
+
+/** Per-rank fill counters, reused every tick so the hot loop allocates nothing. */
+const rankSlots: Record<string, number> = { melee: 0, ranged: 0, caster: 0, support: 0 };
+
+/** Give every reanchoring ally its slot in the shared army line for its behaviour rank.
+ *  Ranks keep their distinct DEPTH (tanks ahead of swordsmen, archers behind both, support in
+ *  the courtyard) — this only unifies them LATERALLY, which is what "the whole army groups
+ *  together in front" means. Slots are handed out in list order, so when an ally dies the line
+ *  simply compacts instead of leaving a hole. */
+function rebuildFormation(list: AllyUnit[], frontWall: Wall): void {
+  rankSlots.melee = 0;
+  rankSlots.ranged = 0;
+  rankSlots.caster = 0;
+  rankSlots.support = 0;
+  for (const ally of list) {
+    const def = ally.def;
+    if (!def.reanchorToFront) continue; // engineer holds its own wall on purpose
+    const slot = rankSlots[def.behavior]++;
+    const x = rallyX + lineSlotOffset(slot, def.lineSpacing);
+    ally.guardX = Math.max(-ARMY_RALLY_MAX_X - 4, Math.min(ARMY_RALLY_MAX_X + 4, x));
+    ally.guardZ = guardZFor(def, frontWall);
+  }
 }
 
 export function spawnAlly(game: GameState, def: AllyDef, pos: Vector3, guard: { x: number; z: number }, homeTier: WallTier): AllyUnit {
@@ -190,12 +289,23 @@ export function spawnAlly(game: GameState, def: AllyDef, pos: Vector3, guard: { 
     nextAttackAt: 0,
     nextActionAt: 0,
     targetId: null,
-    takeDamage(amount: number, _g: GameState): void {
+    nextThornsAt: 0,
+    nextReviveAt: 0,
+    takeDamage(amount: number, g: GameState): void {
       if (!unit.alive) return;
-      unit.hp -= amount * (1 - (unit.def.damageReductionPct ?? 0));
-      if (unit.hp > 0) return;
-      unit.hp = 0;
-      unit.alive = false;
+      const nextHp = unit.hp - amount * (1 - (unit.def.damageReductionPct ?? 0));
+      if (nextHp > 0) {
+        unit.hp = nextHp;
+      } else {
+        const saved = tryMedicSave(unit, g);
+        if (saved !== null) {
+          unit.hp = saved;
+        } else {
+          unit.hp = 0;
+          unit.alive = false;
+        }
+      }
+      if (unit.alive) pulseThornsIfReady(unit, g);
     },
   };
   game.allies.push(unit);
@@ -204,6 +314,10 @@ export function spawnAlly(game: GameState, def: AllyDef, pos: Vector3, guard: { 
 
 export function initAllies(game: GameState): void {
   const repairBudget = new Map<WallTier, number>();
+  // Field Hospital's Emergency Patching: last wave number each wall tier's once-per-wave burst
+  // fired on, shared across every engineer touching that wall (mirrors repairBudget's per-tier
+  // sharing) so multiple engineers on the same wall can't each trigger their own burst.
+  const emergencyPatchedWave = new Map<WallTier, number>();
 
   game.addSystem({
     tick(dt) {
@@ -214,19 +328,17 @@ export function initAllies(game: GameState): void {
       if (game.phase !== 'build' && game.phase !== 'combat') return;
 
       const list = game.allies as AllyUnit[]; // everything in game.allies today is one of these
-      const enemies = game.unitsOfTeam('attacker');
+      const enemies: Enemy[] = game.enemies.filter((e) => e.alive); // same living-only filter unitsOfTeam('attacker') applies
       const frontWall = game.castle.outermostIntactWall();
       repairBudget.clear();
 
-      // Re-anchor every reanchoring ally's guard Z to the current front every tick — see the
-      // module doc comment for why this can't turn into a stampede. guardZFor honors lineSide,
-      // so 'back'-sided allies (medic) land in the courtyard behind the new front wall, not out
-      // in front of it, exactly like guardPostFor computes at spawn. guardX is untouched: it was
-      // already banded/fanned at spawn time (see guardPostFor) and never needs to move again.
+      // Rebuild the shared army formation every tick: one line per rank, centred on the fight,
+      // anchored to the current front wall. This replaces the old "each spawner holds its own
+      // banded patch of wall" placement, which scattered the army into disconnected pockets and
+      // left whole squads idle because target acquisition measures from an ally's own post.
       if (frontWall) {
-        for (const ally of list) {
-          if (ally.def.reanchorToFront) ally.guardZ = guardZFor(ally.def, frontWall);
-        }
+        updateRally(game, frontWall);
+        rebuildFormation(list, frontWall);
       }
 
       for (const ally of list) {
@@ -240,7 +352,7 @@ export function initAllies(game: GameState): void {
             stepRangedOrCaster(ally, dt, game, enemies);
             break;
           case 'support':
-            stepSupport(ally, dt, game, repairBudget);
+            stepSupport(ally, dt, game, repairBudget, emergencyPatchedWave);
             break;
         }
       }

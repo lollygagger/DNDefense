@@ -139,6 +139,41 @@ let launchHook:
  *  — so the caller can time landing AoE damage to the real touchdown. Safe to call at any time;
  *  cancels (and finalizes, via its own onLand/onArrive) any in-flight pull first so the two
  *  mobility overrides can never fight over player position in the same tick. */
+/** Drive the player straight down hard (the Warrior's aerial Ground Slam). Expressed in terms of
+ *  launchPlayer with no horizontal component and a negative vertical one, so it reuses the exact
+ *  same gravity, ground-collision and landing-callback path a leap does — `onLand` fires the tick
+ *  the feet actually touch down, which is what lets the slam resolve where the player really
+ *  landed instead of on a timer. */
+export function slamDown(speed: number, onLand?: () => void): void {
+  launchPlayer(0, 0, 0, -Math.abs(speed), onLand);
+}
+
+let dashHook:
+  | ((dirX: number, dirZ: number, speed: number, duration: number, onEnd?: () => void) => void)
+  | null = null;
+
+/** Drive the player in a flat horizontal dash (the Tank's Shield Charge): a fixed horizontal
+ *  velocity held for `duration` seconds with NO vertical impulse, so it reads as a shoulder-barge
+ *  along the ground rather than a jump.
+ *
+ *  This can't be expressed with launchPlayer(vSpeed = 0): that marks the player airborne, and the
+ *  very next tick's gravity puts them straight back on the ground, which ends the launch (and
+ *  fires its onLand) after a single frame. A dash therefore needs its own duration-driven state.
+ *  Gravity and the ground clamp still run normally underneath, so a dash follows terrain, rides
+ *  up stair ramps, and falls off ledges instead of flying. Horizontal collision, the step-up rule
+ *  and the playfield clamp all apply exactly as they do to walking, so a dash can neither phase
+ *  through a wall nor leave the map. `onEnd` fires exactly once when the dash finishes (or is
+ *  cut short by another override taking over). */
+export function dashPlayer(
+  dirX: number,
+  dirZ: number,
+  speed: number,
+  duration: number,
+  onEnd?: () => void
+): void {
+  dashHook?.(dirX, dirZ, speed, duration, onEnd);
+}
+
 export function launchPlayer(
   dirX: number,
   dirZ: number,
@@ -200,6 +235,7 @@ export function initPlayer(game: GameState): void {
     // A direct pos.set() (Blink) must not leave a stale climb pinned to the ladder the player
     // was on before teleporting — see the module doc comment.
     climbing = false;
+    if (dashing) endDash();
   };
   moveSpeedMultHook = (mult) => {
     moveSpeedMult = mult;
@@ -208,6 +244,11 @@ export function initPlayer(game: GameState): void {
   // --- Leap (launch) state: a persistent horizontal velocity WASD cannot overwrite mid-flight,
   // plus the vertical speed handed to the shared vy/gravity integration below. ---
   let launching = false;
+  let dashing = false;
+  let dashVX = 0;
+  let dashVZ = 0;
+  let dashLeft = 0;
+  let dashOnEnd: (() => void) | null = null;
   let launchVX = 0;
   let launchVZ = 0;
   let launchOnLand: (() => void) | null = null;
@@ -259,7 +300,28 @@ export function initPlayer(game: GameState): void {
     if (grounded) vy = 0;
   }
 
+  function endDash(): void {
+    dashing = false;
+    const cb = dashOnEnd;
+    dashOnEnd = null;
+    cb?.();
+  }
+
+  dashHook = (dirX, dirZ, speed, duration, onEnd) => {
+    if (pulling) endPull();
+    if (climbing) endClimb(false);
+    if (launching) endLaunch();
+    if (dashing) endDash(); // finalize a dash already running before starting another
+    const len = Math.hypot(dirX, dirZ) || 1;
+    dashVX = (dirX / len) * speed;
+    dashVZ = (dirZ / len) * speed;
+    dashLeft = duration;
+    dashing = true;
+    dashOnEnd = onEnd ?? null;
+  };
+
   launchHook = (dirX, dirZ, hSpeed, vSpeed, onLand) => {
+    if (dashing) endDash(); // a launch supersedes a dash
     if (pulling) endPull(); // the two overrides can't coexist — finalize whichever was running
     if (climbing) endClimb(false); // let go and fall from here; the leap's own vy takes over below
     const len = Math.hypot(dirX, dirZ) || 1;
@@ -435,7 +497,14 @@ export function initPlayer(game: GameState): void {
 
     let mx: number;
     let mz: number;
-    if (launching) {
+    if (dashing) {
+      // Flat charge: fixed horizontal velocity, input ignored, vertical left entirely to the
+      // normal gravity/ground-clamp path below so the dash hugs the ground instead of arcing.
+      mx = dashVX;
+      mz = dashVZ;
+      dashLeft -= dt;
+      if (dashLeft <= 0) endDash();
+    } else if (launching) {
       mx = launchVX;
       mz = launchVZ;
     } else {

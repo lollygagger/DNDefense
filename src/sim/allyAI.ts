@@ -1,9 +1,11 @@
 import { Vector3 } from 'three';
 import type { GameState } from './GameState';
-import type { Unit, WallTier } from './types';
+import type { Enemy, Unit, WallTier } from './types';
 import { moveMultiplier, applySlow } from './status';
-import { ENGINEER_WALL_REPAIR_CAP, MELEE_TARGET_MAX_DY } from '../data/allies';
+import { spawnGroundEffect } from './abilityEffects';
+import { ALLY_CHASE_FORWARD, ENGINEER_WALL_REPAIR_CAP, MELEE_TARGET_MAX_DY } from '../data/allies';
 import type { AllyDef, AllyUnit } from './allies';
+import { applyEmergencyPatch, applyMeleeHitEffects } from './allyTierEffects';
 
 /** Owned by [structures-allies]. The four per-behavior step functions `initAllies` (sim/allies.ts)
  *  dispatches on, plus the shared movement/targeting helpers they use. Split out of allies.ts
@@ -74,10 +76,10 @@ function shotBlocked(game: GameState, u: AllyUnit, target: Unit): boolean {
  *  cruising dragon would lock onto it as "nearest" and stand there swinging at the sky, ignoring
  *  the ground enemies actually attacking it — melee has no way to reach an airborne target at
  *  all, unlike ranged/caster allies (see stepRangedOrCaster), so it should never even try. */
-export function stepMelee(ally: AllyUnit, dt: number, game: GameState, enemies: Unit[]): void {
+export function stepMelee(ally: AllyUnit, dt: number, game: GameState, enemies: Enemy[]): void {
   const def = ally.def;
   const speed = def.speed * moveMultiplier(ally, game);
-  let target: Unit | null = null;
+  let target: Enemy | null = null;
   let bestD = def.aggroRange;
   for (const e of enemies) {
     if (Math.abs(e.pos.y - ally.pos.y) >= MELEE_TARGET_MAX_DY) continue;
@@ -93,22 +95,34 @@ export function stepMelee(ally: AllyUnit, dt: number, game: GameState, enemies: 
     const d = distXZ(ally.pos.x, ally.pos.z, target.pos.x, target.pos.z);
     const reach = def.attackRange + target.radius;
     if (d > reach) {
-      moveToward(ally, target.pos.x, target.pos.z, speed, dt);
+      // Hold the rank: pursue laterally as far as needed, but never advance more than
+      // ALLY_CHASE_FORWARD past this ally's own line (see that constant for why).
+      const forwardLimit = ally.guardZ - ALLY_CHASE_FORWARD;
+      moveToward(ally, target.pos.x, Math.max(target.pos.z, forwardLimit), speed, dt);
     } else {
       faceToward(ally, target.pos.x, target.pos.z);
       if (game.time >= ally.nextAttackAt) {
         ally.nextAttackAt = game.time + def.attackInterval;
         target.takeDamage(def.damage, game);
+        // Swordsman Armory's high tier (mutually exclusive — see data/structures.ts's ARMORY.
+        // upgrades): applyMeleeHitEffects handles Bleeding Strikes/Sundering Blows. Skipped once
+        // the hit was lethal — no point marking a corpse.
+        if (target.alive) applyMeleeHitEffects(def, target, game);
+        // Tank Barracks' Hardened Resolve: sustain through LANDED hits (contrast Retaliation
+        // Plating, which reacts to damage TAKEN — see spawnAlly's takeDamage in sim/allies.ts).
+        if (def.healOnHit) ally.hp = Math.min(ally.maxHp, ally.hp + def.healOnHit);
       }
     }
     return;
   }
   ally.targetId = null;
   const d = distXZ(ally.pos.x, ally.pos.z, ally.guardX, ally.guardZ);
-  if (d > def.guardTolerance) moveToward(ally, ally.guardX, ally.guardZ, speed, dt);
+  // Form-up speed, not combat speed: a heavy unit should still take its place in the line
+  // promptly, or the slowest rank permanently trails the rank it is supposed to stand in front of.
+  if (d > def.guardTolerance) moveToward(ally, ally.guardX, ally.guardZ, speed * (def.formUpSpeedMult ?? 1), dt);
 }
 
-function fireAt(ally: AllyUnit, def: AllyDef, target: Unit, game: GameState): void {
+function fireAt(ally: AllyUnit, def: AllyDef, target: Unit, game: GameState, damageOverride?: number): void {
   const muzzle = muzzleOf(ally).clone();
   const aimY = target.pos.y + target.height * 0.5;
   tmpVel.set(target.pos.x - muzzle.x, aimY - muzzle.y, target.pos.z - muzzle.z);
@@ -118,28 +132,52 @@ function fireAt(ally: AllyUnit, def: AllyDef, target: Unit, game: GameState): vo
   const slowPct = def.slowPct;
   const slowDuration = def.slowDuration ?? 2;
   const aoeRadius = def.aoeRadius;
+  // Mage Tower's Arcane Residue/Arcane Blight (mutually exclusive with Twin/Triple Casting — see
+  // data/structures.ts's MAGE_TOWER.upgrades): the blast leaves a lingering scorched patch behind
+  // via the same generic sim/abilityEffects.ts helper the player Mage's own Volcanic Rupture and
+  // Killing Frost Mastery branches use, paired with a manual impacts push carrying the REAL
+  // radius/duration (same "cosmetic ring via the impacts channel" pattern data/mage.ts's
+  // frostField cast() uses) so the fx layer's field never disagrees with what the sim actually
+  // placed there.
+  const lingerDps = def.lingerDps;
+  const lingerDuration = def.lingerDuration ?? 3;
+  const lingerRadius = def.lingerRadius ?? aoeRadius ?? 2.5;
   game.projectiles.spawn({
     pos: muzzle,
     vel: tmpVel.clone(),
     team: 'defender',
-    damage: def.damage,
+    damage: damageOverride ?? def.damage,
     radius: def.projectileRadius ?? 0.2,
     aoeRadius,
+    // Archer Barracks' Broadhead Arrows/Piercing Volley (mutually exclusive with Explosive
+    // Fletching below): full damage to every extra enemy pierced, same as the crossbow's Ballista
+    // branch — see sim/projectiles.ts's pierce handling.
+    pierce: def.pierce ?? 0,
     ttl: def.projectileTtl ?? 1.5,
     // Reuse existing render styles rather than adding new ones to render/fx.ts (owned by
     // [ability-fx], not this task): 'arrow' already renders a plain fletched shaft (archer
-    // allies), 'frost' already renders an icy impact + lingering field sized to aoeRadius
-    // (ally mage's slow-on-hit caster bolt).
-    kind: def.behavior === 'caster' ? 'frost' : 'arrow',
+    // allies), 'frost' already renders an icy impact + lingering field sized to aoeRadius (ally
+    // mage's slow-on-hit caster bolt). Archer Barracks' Explosive Fletching branch sets aoeRadius
+    // on an otherwise-arrow ally, so it borrows 'cannonball' instead — the exact same choice the
+    // player Archer's own Rapid Volley -> Siege Rounds Mastery makes for its full-auto arrows
+    // once THEY gain aoeRadius (data/archer.ts) — whose impact effect draws a ring sized to the
+    // real blast radius, unlike the plain 'arrow' look.
+    kind: def.behavior === 'caster' ? 'frost' : aoeRadius ? 'cannonball' : 'arrow',
     onImpact:
-      slowPct && aoeRadius
+      (slowPct && aoeRadius) || lingerDps
         ? (g, at) => {
-            const factor = 1 - slowPct / 100;
-            for (const e of g.enemies) {
-              if (!e.alive) continue;
-              const dx = e.pos.x - at.x;
-              const dz = e.pos.z - at.z;
-              if (dx * dx + dz * dz <= aoeRadius * aoeRadius) applySlow(e, g, factor, slowDuration);
+            if (slowPct && aoeRadius) {
+              const factor = 1 - slowPct / 100;
+              for (const e of g.enemies) {
+                if (!e.alive) continue;
+                const dx = e.pos.x - at.x;
+                const dz = e.pos.z - at.z;
+                if (dx * dx + dz * dz <= aoeRadius * aoeRadius) applySlow(e, g, factor, slowDuration);
+              }
+            }
+            if (lingerDps) {
+              spawnGroundEffect(g, at, lingerRadius, lingerDuration, { dps: lingerDps });
+              g.projectiles.impacts.push({ pos: at.clone(), kind: 'frost', aoe: true, radius: lingerRadius, duration: lingerDuration });
             }
           }
         : undefined,
@@ -162,13 +200,13 @@ function fireAt(ally: AllyUnit, def: AllyDef, target: Unit, game: GameState): vo
  *  vector and feed it through castle.blocksProjectile (also fully 3D — see sim/castle.ts), so a
  *  balloon well above the merlon line is correctly unblocked while a diving dragon below it is
  *  correctly blockable, with no changes needed there. */
-export function stepRangedOrCaster(ally: AllyUnit, dt: number, game: GameState, enemies: Unit[]): void {
+export function stepRangedOrCaster(ally: AllyUnit, dt: number, game: GameState, enemies: Enemy[]): void {
   const def = ally.def;
   const speed = def.speed * moveMultiplier(ally, game);
   const dPost = distXZ(ally.pos.x, ally.pos.z, ally.guardX, ally.guardZ);
   if (dPost > def.guardTolerance) moveToward(ally, ally.guardX, ally.guardZ, speed, dt);
 
-  let target: Unit | null = null;
+  let target: Enemy | null = null;
   let bestD = def.aggroRange;
   for (const e of enemies) {
     const d = distXZ(e.pos.x, e.pos.z, ally.guardX, ally.guardZ);
@@ -188,6 +226,26 @@ export function stepRangedOrCaster(ally: AllyUnit, dt: number, game: GameState, 
   if (shotBlocked(game, ally, target)) return; // wall in the way — don't feed shots into stone
   ally.nextAttackAt = game.time + def.attackInterval;
   fireAt(ally, def, target, game);
+
+  // Mage Tower's Twin Casting/Triple Casting (mutually exclusive with Arcane Residue above): the
+  // same cast also fires `extraBoltCount` weaker bolts (extraBoltDamageMult of the primary
+  // damage) at other nearby enemies, so one cast answers a small spread group instead of
+  // committing everything to a single target — named after, and the ally-tower mirror of, the
+  // player Mage's own Fork Bolt -> Arcane Fusillade Mastery. Only the Mage Tower ever sets
+  // extraBoltCount, so this is a no-op loop (immediately false on `def.extraBoltCount`) for every
+  // other ranged/caster ally.
+  if (def.extraBoltCount) {
+    const extraDamage = def.damage * (def.extraBoltDamageMult ?? 0.5);
+    let fired = 0;
+    for (const e of enemies) {
+      if (fired >= def.extraBoltCount) break;
+      if (e.id === target.id) continue;
+      if (dist3D(ally.pos.x, ally.pos.y, ally.pos.z, e.pos.x, e.pos.y, e.pos.z) > def.attackRange) continue;
+      if (shotBlocked(game, ally, e)) continue;
+      fireAt(ally, def, e, game, extraDamage);
+      fired++;
+    }
+  }
 }
 
 function stepMedic(ally: AllyUnit, def: AllyDef, game: GameState): void {
@@ -221,9 +279,24 @@ function stepMedic(ally: AllyUnit, def: AllyDef, game: GameState): void {
  *  (ENGINEER_WALL_REPAIR_CAP, see data/allies.ts) shared across every engineer touching that
  *  wall this tick, regardless of how many Field Hospitals/upgrades exist — the hard cap that
  *  keeps a maxed-out setup from making a wall effectively invincible under sustained assault. */
-function stepEngineer(ally: AllyUnit, def: AllyDef, dt: number, game: GameState, repairBudget: Map<WallTier, number>): void {
+function stepEngineer(
+  ally: AllyUnit,
+  def: AllyDef,
+  dt: number,
+  game: GameState,
+  repairBudget: Map<WallTier, number>,
+  emergencyPatchedWave: Map<WallTier, number>,
+): void {
   const wall = game.castle.walls[ally.homeTier - 1];
-  if (!wall.built || wall.hp <= 0 || wall.hp >= wall.maxHp) return;
+  if (!wall.built || wall.hp <= 0) return;
+
+  // Field Hospital's Emergency Patching/Triage Protocols — independent of the steady trickle
+  // below (see applyEmergencyPatch's doc comment in sim/allyTierEffects.ts and data/structures.ts's
+  // FIELD_HOSPITAL.upgrades doc comment on why this building's high tier isn't a mutually
+  // exclusive pair like the other four spawners').
+  applyEmergencyPatch(ally, def, wall, game, emergencyPatchedWave);
+
+  if (wall.hp >= wall.maxHp) return;
   // Budget is expressed in hp/sec (ENGINEER_WALL_REPAIR_CAP) but tracked in hp actually applied
   // this tick, so scale the ceiling by dt to compare like with like.
   const tickCap = ENGINEER_WALL_REPAIR_CAP * dt;
@@ -246,16 +319,60 @@ function stepEngineer(ally: AllyUnit, def: AllyDef, dt: number, game: GameState,
  *  raised mid-build immediately starts training its first medic/engineer, same as an Armory
  *  does, so the player sees their gold take effect right away instead of a building that
  *  visibly does nothing until combat starts. */
-export function stepSupport(ally: AllyUnit, dt: number, game: GameState, repairBudget: Map<WallTier, number>): void {
+/** The most-wounded defender a medic should go treat: worst-off first, leashed to the medic's
+ *  own formation post so it stays with the army instead of chasing one straggler across the map. */
+function medicPatient(ally: AllyUnit, def: AllyDef, game: GameState): Unit | null {
+  const followRange = def.followRange ?? 14;
+  let best: Unit | null = null;
+  let worst = 0;
+  for (const u of game.unitsOfTeam('defender')) {
+    if (!u.alive || u === (ally as unknown as Unit) || u.hp >= u.maxHp) continue;
+    if (distXZ(u.pos.x, u.pos.z, ally.guardX, ally.guardZ) > followRange) continue;
+    const missing = 1 - u.hp / u.maxHp;
+    if (missing > worst) {
+      worst = missing;
+      best = u;
+    }
+  }
+  return best;
+}
+
+export function stepSupport(
+  ally: AllyUnit,
+  dt: number,
+  game: GameState,
+  repairBudget: Map<WallTier, number>,
+  emergencyPatchedWave: Map<WallTier, number>,
+): void {
   const def = ally.def;
   const speed = def.speed * moveMultiplier(ally, game);
+  ally.targetId = null;
+
+  // Medics go TO the wounded. Every other support behaviour holds a post, and a medic that does
+  // the same is close to useless: the wounded are at the front line by definition, so a medic
+  // parked behind the wall only ever heals whoever happens to retreat far enough back to it.
+  // Following the army is the whole job.
+  if (def.supportKind === 'medic') {
+    const patient = game.phase === 'combat' ? medicPatient(ally, def, game) : null;
+    if (patient) {
+      ally.targetId = patient.id;
+      const standoff = def.healStandoff ?? 3;
+      if (distXZ(ally.pos.x, ally.pos.z, patient.pos.x, patient.pos.z) > standoff) {
+        moveToward(ally, patient.pos.x, patient.pos.z, speed, dt);
+      }
+    } else {
+      const dPost = distXZ(ally.pos.x, ally.pos.z, ally.guardX, ally.guardZ);
+      if (dPost > def.guardTolerance) moveToward(ally, ally.guardX, ally.guardZ, speed, dt);
+    }
+    if (game.phase === 'combat') stepMedic(ally, def, game);
+    return;
+  }
+
+  // Engineers (and any future post-holding support) keep the original behaviour: hold station.
   const dPost = distXZ(ally.pos.x, ally.pos.z, ally.guardX, ally.guardZ);
   if (dPost > def.guardTolerance) moveToward(ally, ally.guardX, ally.guardZ, speed, dt);
-  ally.targetId = null;
   if (game.phase !== 'combat') return;
-
-  if (def.supportKind === 'medic') stepMedic(ally, def, game);
-  else if (def.supportKind === 'engineer') stepEngineer(ally, def, dt, game, repairBudget);
+  if (def.supportKind === 'engineer') stepEngineer(ally, def, dt, game, repairBudget, emergencyPatchedWave);
 }
 
 /** Gentle pairwise push-apart so allies don't stack. Averages the two combatants' own

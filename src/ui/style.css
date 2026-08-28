@@ -267,6 +267,47 @@ body {
   height: 20px;
 }
 
+/* Player status row (src/ui/hud.ts) — the same shield/empower/thorns/slow effects
+ * render/enemyView.ts now shows as icons above enemies, surfaced here as small text chips for
+ * the player's own state. Hidden entirely (#status-row has no children) when nothing is active. */
+#status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.status-chip {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  background: rgba(26, 23, 18, 0.82);
+  border: 1px solid var(--stone-600);
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
+
+.status-chip.shield {
+  border-color: #8ab8e0;
+  color: #cfe6ff;
+}
+
+.status-chip.empower {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.status-chip.thorns {
+  border-color: var(--danger-bright);
+  color: #ffd9d9;
+}
+
+.status-chip.slowed {
+  border-color: #7fd8ff;
+  color: #cdeeff;
+}
+
 .wall-bar {
   height: 16px;
   margin: 4px 0;
@@ -381,6 +422,31 @@ body {
   background: var(--gold-bright);
   border-color: var(--gold);
   box-shadow: 0 0 3px rgba(243, 214, 104, 0.9);
+}
+
+/* Late-game Mastery-tree progress pips (sim/abilityTree.ts) — a distinct violet diamond next to
+ * the gold rank dots, so "maxed linear ranks" and "picked a Mastery branch" never look the same
+ * at a glance. */
+.pip.mastery {
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.pip.mastery.on {
+  background: #b98bff;
+  border-color: #8a5cf0;
+  box-shadow: 0 0 3px rgba(185, 139, 255, 0.9);
+}
+
+/* Compact "current/max" readout that replaces one-dot-per-rank once an ability has more linear
+ * ranks than comfortably fit as individual dots in the 58px ability-bar slot (see hud.ts's
+ * PIP_DOT_LIMIT). */
+.pip-count {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+  line-height: 1;
 }
 
 #toasts {
@@ -578,6 +644,12 @@ body {
   padding: 12px 16px;
   overflow-y: auto;
   flex: 1 1 auto;
+  /* Without this the panel cannot scroll at all. A flex item defaults to min-height: auto,
+   * which refuses to shrink below its content, so a tall body (the castle menu's Fortify
+   * drill-down is the tallest screen in the game) overflows the panel's max-height instead
+   * of scrolling inside it. min-height: 0 is what lets overflow-y actually engage. */
+  min-height: 0;
+  overscroll-behavior: contain; /* don't chain the scroll to the page behind the menu */
 }
 
 .menu-body::-webkit-scrollbar {
@@ -609,6 +681,22 @@ body {
 
 .menu-row:last-child {
   border-bottom: none;
+}
+
+/* The Tab class menu's per-ability row now stacks the usual name/desc/action strip on top of an
+ * optional Mastery tree section below it — .menu-row's own flex layout only fits the top strip,
+ * so an ability row with a tree switches the outer element to a block and moves the flex onto
+ * the inner .ability-row-top instead. Abilities with no tree render the same as before (the
+ * empty string abilityTreeHtml returns adds nothing below the top strip). */
+.menu-row.ability-row {
+  display: block;
+}
+
+.ability-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
 }
 
 .menu-empty {
@@ -669,6 +757,7 @@ body {
 
 .upgrade-cols {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   margin-top: 10px;
   align-items: stretch;
@@ -679,7 +768,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 0;
+  /* Upgrade trees grew from 2 branches (crossbow) to as many as 5 (Mage Tower's high tier). Five
+   * across a 620px panel is ~104px each, which clips node names and cost buttons — measured, not
+   * guessed. A real floor plus flex-wrap on the container lets a wide tree flow onto a second row
+   * instead of compressing into unusable slivers; 2- and 3-column trees still fit one row and are
+   * unaffected. Was `min-width: 0`, which is what allowed the collapse. */
+  min-width: 168px;
   padding: 8px;
   background: rgba(0, 0, 0, 0.18);
   border-radius: 8px;
@@ -1031,4 +1125,92 @@ body {
   #vignette.hit {
     animation: none !important;
   }
+}
+
+/* =======================================================================
+   PLAYGROUND / sandbox mode  (src/ui/playground.ts)
+   Deliberately reads as a dev tool, not part of the fiction — a cool cyan
+   against the game's warm gold, so it's obvious the run isn't a normal one.
+   ======================================================================= */
+
+#playground-toggle {
+  pointer-events: auto;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #bfe9ff;
+  background: rgba(20, 34, 42, 0.75);
+  border: 1px dashed #4a90a4;
+  border-radius: 8px;
+}
+
+#playground-toggle:hover {
+  background: rgba(26, 44, 54, 0.9);
+}
+
+#playground-toggle input {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: #4ab8d4;
+}
+
+#playground-badge {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: var(--z-hud);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #bfe9ff;
+  background: rgba(20, 34, 42, 0.85);
+  border: 1px dashed #4a90a4;
+  border-radius: 999px;
+  pointer-events: none;
+  text-shadow: 0 1px 2px #000;
+}
+
+#playground-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-menu);
+}
+
+#playground-root .menu-panel {
+  border-color: #4a90a4;
+}
+
+.pg-note {
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #bfe9ff;
+  background: rgba(20, 34, 42, 0.6);
+  border-left: 3px solid #4a90a4;
+  border-radius: 4px;
+}
+
+.pg-wave {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-input {
+  pointer-events: auto;
+  width: 74px;
+  padding: 7px 9px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--parchment);
+  background: var(--stone-950);
+  border: 1px solid var(--stone-600);
+  border-radius: 5px;
 }

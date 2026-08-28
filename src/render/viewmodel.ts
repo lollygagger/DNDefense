@@ -3,6 +3,7 @@ import type { GameState } from '../sim/GameState';
 import { R } from './scene';
 import { playerMotion } from '../player/controller';
 import { actionState } from '../player/actionState';
+import { updateChannelBeam } from './aerialBeam';
 
 /** Owned by [player-classes]. First-person viewmodels: a low-poly weapon prop per class,
  *  attached to the camera. Render-only cosmetics — `actionState`/`playerMotion` are read-only.
@@ -15,10 +16,11 @@ import { actionState } from '../player/actionState';
 // Viewmodel scale: kept small enough that even full-extension animations stay clear of the
 // crosshair at screen center (see each rig's own base position/scale below).
 const MAGE_SCALE = 0.34, WARRIOR_SCALE = 0.42, ARCHER_SCALE = 0.5, TANK_SCALE = 0.4, MAGE_ORB_EMISSIVE = 1.3;
+const WARLOCK_SCALE = 0.36, WARLOCK_BASE_EMISSIVE = 1.0, WARLOCK_BEAM_COLOR = 0xff2fb8;
 // Point lights sit ~0.6 units from the camera; anything with real reach floods the scene.
 const BASE_LIGHT_INTENSITY = 0.1, LIGHT_DISTANCE = 1.5, FLASH_DECAY = 0.25;
 // Archer draw/loose.
-const DRAW_PULL = 0.16, DRAW_RISE = 0.035, ARROW_HEAD_Z = -0.05;
+const DRAW_PULL = 0.16, DRAW_RISE = 0.035, ARROW_LENGTH = 0.62;
 const TREMOR_START = 0.92, TREMOR_AMOUNT = 0.006, RECOIL_DURATION = 0.22, RECOIL_OVERSHOOT = 0.05;
 // Weight/lag/landing/leap polish.
 const LAG_BASE_RATE = 14, LAND_DURATION = 0.28, LAND_DROP = 0.05;
@@ -147,11 +149,30 @@ const ABILITY_ANIM: Record<string, AbilityAnim> = {
   shieldSlam: groundSlamAnim, // same overhead-raise/hold/smash arc — a mace slam is the same gesture
   bulwark: gesture({ y: 0.08, z: 0.12, rx: -0.12 }, 0.5),
   shieldCharge: gesture({ z: -0.08, rx: -0.1, y: -0.05 }, 0.22),
+  // Soul Siphon fires an `ability:cast` every ~0.15s tick while held — an empty gesture (no pose
+  // offset at all) so those rapid resets never thrash the rig; the actual "channelling" pose
+  // (tremor + charge-up glow) is owned entirely by buildWarlockRig's continuous() hook below,
+  // driven from live actionState rather than the fire-and-forget cast animation system.
+  soulSiphon: gesture({}, 0.1),
+  curseOfAgony: gesture({ z: -0.12, rx: -0.28, ry: 0.1 }, 0.35),
+  abyssalGrasp: gesture({ ry: -0.3, rz: -0.14, z: -0.08 }, 0.45),
+  voidstep: gesture({ scale: -0.85, z: 0.1 }, 0.3),
 };
+
+// NOTE ON METALNESS: this scene has no environment map, so a high-metalness MeshStandardMaterial
+// has nothing to reflect and renders almost black. Metal props here fake it with a bright base
+// colour and LOW metalness — raising metalness to make something look "more metal" does the exact
+// opposite. Keep metalness <= ~0.25 on anything that should read as lit steel.
 
 // ---------- rigs ----------
 
-interface ContinuousCtx { charge01: number; chargingId: string | null; justReleased: boolean; }
+interface ContinuousCtx {
+  charge01: number;
+  chargingId: string | null;
+  justReleased: boolean;
+  channelId: string | null; // warlock: ability id currently being channelled, else null
+  channelRamp01: number; // warlock: live ramp progress on whatever the beam is locked onto
+}
 
 interface ViewmodelRig {
   group: THREE.Group;
@@ -161,8 +182,9 @@ interface ViewmodelRig {
   weight: number; // 0 (light) .. 1 (heavy): camera-lag + landing dip amount; sword heavy, bow light
   light?: THREE.Light;
   setFlash(flash01: number, big: boolean): void; // flash01 decays 1->0 over FLASH_DECAY; big = non-primary
-  continuous?(dt: number, ctx: ContinuousCtx): void; // archer: pose bow/string/arrow from draw state
+  continuous?(dt: number, ctx: ContinuousCtx): void; // archer: pose bow/string/arrow; warlock: channel tremor + beam
   grappleAttach?: THREE.Object3D; // archer: world-space rope origin
+  beamAttach?: THREE.Object3D; // warlock: world-space channel-beam origin (the rod's crystal tip)
 }
 
 /** Build a mesh (optionally at [x,y,z]), add it to `group`, and return it — the one-liner
@@ -230,9 +252,9 @@ function buildWarriorRig(): ViewmodelRig {
   const basePos = new THREE.Vector3(0.36, -0.32, -0.58), baseRot = new THREE.Euler(-0.15, 0.22, -0.22);
   const group = startRig(basePos, baseRot, WARRIOR_SCALE);
 
-  addMesh(group, new THREE.BoxGeometry(0.09, 1.0, 0.022), stdMat(0xcdd6dd, { roughness: 0.35, metalness: 0.75 }), [0, 0.62, 0]);
+  addMesh(group, new THREE.BoxGeometry(0.09, 1.0, 0.022), stdMat(0xd8e0e6, { roughness: 0.4, metalness: 0.2 }), [0, 0.62, 0]);
 
-  const goldMat = stdMat(0xd4af37, { roughness: 0.4, metalness: 0.6 });
+  const goldMat = stdMat(0xe0bf47, { roughness: 0.45, metalness: 0.2 });
   addMesh(group, new THREE.BoxGeometry(0.34, 0.06, 0.06), goldMat, [0, 0.1, 0]);
   addMesh(group, new THREE.CylinderGeometry(0.035, 0.04, 0.26, 8), stdMat(0x3a2a1a, { roughness: 0.9 }), [0, -0.06, 0]);
   addMesh(group, new THREE.SphereGeometry(0.055, 10, 8), goldMat, [0, -0.21, 0]);
@@ -271,21 +293,38 @@ function buildArcherRig(): ViewmodelRig {
   const stringRestZ = -limbR * Math.cos(arc / 2);
   const stringLen = 2 * limbR * Math.sin(arc / 2);
   const string = addMesh(group, new THREE.CylinderGeometry(0.006, 0.006, stringLen, 5), stdMat(0xe8e2d0, { roughness: 0.6 }), [0, 0, stringRestZ]);
-  const grip = addMesh(group, new THREE.BoxGeometry(0.05, 0.22, 0.05), stdMat(0x3a2a1a, { roughness: 0.85 }), [0, 0, -0.2]);
+  // Riser sits ON the belly of the limb (z = -limbR), where a hand actually grips a bow. It used
+  // to float at z = -0.2, unattached, hanging in the middle of the bow's opening — which is most
+  // of why the bow read as broken apart rather than as one object.
+  const bellyZ = -limbR;
+  const grip = addMesh(group, new THREE.BoxGeometry(0.055, 0.26, 0.075), stdMat(0x3a2a1a, { roughness: 0.85 }), [0, 0, bellyZ + 0.01]);
+  // Shelf/arrow rest jutting off the riser, so the arrow visibly lies on something.
+  addMesh(group, new THREE.BoxGeometry(0.05, 0.018, 0.05), stdMat(0x4a3520, { roughness: 0.85 }), [0.03, 0.03, bellyZ + 0.05]);
 
   const gemMat = stdMat(0x3ea373, { emissive: 0x3ea373, emissiveIntensity: 1.1, roughness: 0.25 });
-  const gem = addMesh(group, new THREE.SphereGeometry(0.028, 10, 8), gemMat, [0, 0, -0.24]);
+  const gem = addMesh(group, new THREE.SphereGeometry(0.03, 10, 8), gemMat, [0, -0.08, bellyZ + 0.05]);
   const gemLight = addLight(group, 0x3ea373, gem.position);
 
-  // Nocked arrow: head fixed at the rest point near the grip, shaft stretches back to the string.
+  // Nocked arrow: a RIGID arrow of fixed length that slides backward with the string as you draw.
+  // It used to be modelled with the head pinned in place and the shaft scaled to reach the string,
+  // so drawing visibly stretched the arrow like rubber instead of pulling it back. Built nock-at-
+  // origin pointing forward (-Z), so the whole group just translates by the draw distance.
   const arrowGroup = new THREE.Group();
   arrowGroup.visible = false;
+  arrowGroup.position.z = stringRestZ;
   group.add(arrowGroup);
-  const shaftGeo = new THREE.CylinderGeometry(0.01, 0.01, 1, 5);
-  shaftGeo.rotateX(Math.PI / 2); // bake so scale.z stretches it along the draw axis
-  const arrowShaft = addMesh(arrowGroup, shaftGeo, stdMat(0x8a7355, { roughness: 0.7 }));
-  const arrowHead = addMesh(arrowGroup, new THREE.ConeGeometry(0.016, 0.06, 6), stdMat(0x555a5f, { metalness: 0.6, roughness: 0.4 }), [0, 0, ARROW_HEAD_Z]);
-  arrowHead.rotation.x = -Math.PI / 2;
+  const shaftGeo = new THREE.CylinderGeometry(0.009, 0.009, ARROW_LENGTH, 5);
+  shaftGeo.rotateX(Math.PI / 2); // cylinder's +Y axis -> +Z, so the shaft runs along the draw axis
+  addMesh(arrowGroup, shaftGeo, stdMat(0x8a7355, { roughness: 0.7 }), [0, 0, -ARROW_LENGTH / 2]);
+  const arrowHead = addMesh(arrowGroup, new THREE.ConeGeometry(0.018, 0.07, 6), stdMat(0x9aa2a8, { metalness: 0.15, roughness: 0.45 }), [0, 0, -ARROW_LENGTH]);
+  arrowHead.rotation.x = -Math.PI / 2; // cone's +Y tip -> -Z (forward, away from the viewer)
+  // Fletching at the nock end.
+  const fletchMat = stdMat(0xb04a4a, { roughness: 0.8 });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const f = addMesh(arrowGroup, new THREE.BoxGeometry(0.004, 0.03, 0.07), fletchMat, [Math.cos(a) * 0.012, Math.sin(a) * 0.012, -0.05]);
+    f.rotation.z = a;
+  }
 
   let drawVisual = 0; // 0 = rest, 1 = full draw; independent of charge01 so release can snap it
   let recoilT = 1, releaseFrom = 0, localT = 0; // recoilT: 1 = settled, 0 = just released
@@ -324,9 +363,7 @@ function buildArcherRig(): ViewmodelRig {
 
       const tailZ = stringRestZ + drawVisual * DRAW_PULL;
       string.position.z = tailZ;
-      const shaftLen = Math.max(0.001, tailZ - ARROW_HEAD_Z);
-      arrowShaft.scale.z = shaftLen;
-      arrowShaft.position.z = ARROW_HEAD_Z + shaftLen / 2;
+      arrowGroup.position.z = tailZ; // rigid arrow rides the string back, never stretches
 
       group.position.y += ctx.charge01 * DRAW_RISE; // aiming settle: slight rise/steadying
       group.rotation.x -= ctx.charge01 * 0.05;
@@ -344,25 +381,44 @@ function buildArcherRig(): ViewmodelRig {
  *  held forward-right — the bulkiest, heaviest-weighted rig (weight 1) so its camera-lag and
  *  landing dip both read as the slowest, heaviest class in the game. */
 function buildTankRig(): ViewmodelRig {
-  const basePos = new THREE.Vector3(0.3, -0.36, -0.6), baseRot = new THREE.Euler(-0.12, 0.16, -0.1);
+  // Straddles the screen centre instead of sitting off to the right like the one-weapon rigs.
+  // The Tank is the only class holding something in BOTH hands, so an off-centre base put the
+  // shield and the mace on the same side of the view, overlapping — they read as one hand full of
+  // stuff. basePos.x near zero lets the shield swing genuinely left-of-centre (off-hand) and the
+  // mace sit right (main hand), which is what actually communicates "shield and weapon".
+  const basePos = new THREE.Vector3(0.05, -0.36, -0.62), baseRot = new THREE.Euler(-0.12, 0.1, -0.06);
   const group = startRig(basePos, baseRot, TANK_SCALE);
 
-  const steelMat = stdMat(0x6b7280, { roughness: 0.55, metalness: 0.5 });
-  const shield = addMesh(group, new THREE.CylinderGeometry(0.34, 0.34, 0.06, 16), steelMat, [-0.32, -0.05, -0.05]);
-  shield.rotation.x = Math.PI / 2;
+  const steelMat = stdMat(0xa8b2bd, { roughness: 0.55, metalness: 0.15 });
+  const woodMat = stdMat(0x4a3520, { roughness: 0.85 });
+  const headMat = stdMat(0xc2c9d0, { roughness: 0.45, metalness: 0.18 });
 
-  addMesh(group, new THREE.CylinderGeometry(0.03, 0.036, 0.85, 8), stdMat(0x4a3520, { roughness: 0.85 }), [0.3, 0.5, 0]);
-  const headMat = stdMat(0x8a8f96, { roughness: 0.4, metalness: 0.7 });
-  addMesh(group, new THREE.SphereGeometry(0.11, 10, 8), headMat, [0.3, 0.92, 0]);
+  // ---- OFF HAND (left of screen): round shield, angled to present its face ----
+  const SHIELD_X = -0.62, SHIELD_Y = 0.3; // Y lifts the disc clear of the bottom of the frame
+  const shield = addMesh(group, new THREE.CylinderGeometry(0.32, 0.32, 0.055, 16), steelMat, [SHIELD_X, SHIELD_Y, -0.02]);
+  shield.rotation.set(Math.PI / 2, 0, 0);
+  shield.rotation.z = 0.18; // tipped so it reads as held at an angle, not a flat coin
+  // Raised rim + central boss give the disc some depth from the front.
+  const rim = addMesh(group, new THREE.TorusGeometry(0.28, 0.033, 6, 20), woodMat, [SHIELD_X, SHIELD_Y, -0.05]);
+  rim.rotation.z = 0.18;
+  const boss = addMesh(group, new THREE.SphereGeometry(0.095, 10, 8), headMat, [SHIELD_X, SHIELD_Y, -0.09]);
+  boss.scale.z = 0.6;
+
+  // ---- MAIN HAND (right of screen): the mace ----
+  const MACE_X = 0.5;
+  addMesh(group, new THREE.CylinderGeometry(0.03, 0.036, 0.8, 8), woodMat, [MACE_X, 0.42, 0]);
+  addMesh(group, new THREE.SphereGeometry(0.11, 10, 8), headMat, [MACE_X, 0.84, 0]);
   const flangeGeo = new THREE.BoxGeometry(0.05, 0.16, 0.05);
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2;
-    const fl = addMesh(group, flangeGeo, headMat, [0.3 + Math.cos(a) * 0.1, 0.92, Math.sin(a) * 0.1]);
+    const fl = addMesh(group, flangeGeo, headMat, [MACE_X + Math.cos(a) * 0.1, 0.84, Math.sin(a) * 0.1]);
     fl.rotation.y = a;
   }
 
-  const gemMat = stdMat(0xffd23f, { emissive: 0xffd23f, emissiveIntensity: 1.1, roughness: 0.3, metalness: 0.5 });
-  const gem = addMesh(group, new THREE.SphereGeometry(0.09, 10, 8), gemMat, [-0.32, -0.05, -0.08]);
+  // Flash gem lives on the shield boss — the Tank's abilities are defensive, so the shield is
+  // where the eye should go when one fires.
+  const gemMat = stdMat(0xffd23f, { emissive: 0xffd23f, emissiveIntensity: 1.1, roughness: 0.3, metalness: 0.1 });
+  const gem = addMesh(group, new THREE.SphereGeometry(0.07, 10, 8), gemMat, [SHIELD_X, SHIELD_Y, -0.13]);
   const gemLight = addLight(group, 0xffd23f, gem.position);
 
   return {
@@ -376,6 +432,129 @@ function buildTankRig(): ViewmodelRig {
   };
 }
 
+const beamFromScratch = new THREE.Vector3();
+
+/** Warlock: a dark, slightly twisted iron rod with a couple of small chain-link accents (the
+ *  pact-magic flavor read) and a floating void-crystal tip that glows magenta — brighter and
+ *  more agitated the longer Soul Siphon stays locked onto a target. The crystal doubles as
+ *  `beamAttach`, the world-space point the persistent channel beam (aerialBeam.ts) is drawn
+ *  from every frame. Distinct hue from every other class/enemy/ally on the field (see
+ *  data/warlock.ts's header) so the beam never reads as friendly fire or an enemy attack. */
+function buildWarlockRig(): ViewmodelRig {
+  const basePos = new THREE.Vector3(0.34, -0.35, -0.62), baseRot = new THREE.Euler(-0.2, 0.2, -0.14);
+  const group = startRig(basePos, baseRot, WARLOCK_SCALE);
+
+  // Wooden haft: two segments with a slight kink between them, so it reads as a cut branch
+  // rather than a machined pole. Tapered thicker at the grip, flat-shaded like everything else.
+  const woodMat = stdMat(0x6b4a2a, { roughness: 0.92, metalness: 0.02 });
+  const darkWoodMat = stdMat(0x4a3220, { roughness: 0.95, metalness: 0.02 });
+  addMesh(group, new THREE.CylinderGeometry(0.03, 0.044, 0.92, 7), woodMat, [0, 0.14, 0]);
+  const upper = addMesh(group, new THREE.CylinderGeometry(0.024, 0.031, 0.5, 7), woodMat, [0.016, 0.63, 0.012]);
+  upper.rotation.z = 0.07; // the kink
+
+  // A couple of knots/burls down the shaft — cheap irregularity that sells "wood" at a glance.
+  for (const [ky, kx] of [[0.02, 0.028], [0.44, -0.026]] as [number, number][]) {
+    const knot = addMesh(group, new THREE.IcosahedronGeometry(0.028, 0), darkWoodMat, [kx, ky, 0.004]);
+    knot.scale.set(1, 0.7, 0.8);
+  }
+
+  // Leather grip wraps, replacing the old iron chain links — warmer, and consistent with wood.
+  const leatherMat = stdMat(0x3a2a1a, { roughness: 0.95, metalness: 0.02 });
+  const wrapGeo = new THREE.CylinderGeometry(0.047, 0.047, 0.05, 8);
+  for (let i = 0; i < 3; i++) addMesh(group, wrapGeo, leatherMat, [0, -0.12 - i * 0.08, 0]);
+
+  // Open claw at the head: three prongs curving up and inward, cradling the crystal WITHOUT
+  // touching it. The gap is the whole point — it's what makes the crystal read as floating
+  // rather than glued to a stick.
+  const CRADLE_Y = 0.9;
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const prong = addMesh(group, new THREE.ConeGeometry(0.016, 0.17, 5), woodMat, [
+      0.016 + Math.cos(a) * 0.052,
+      CRADLE_Y,
+      0.012 + Math.sin(a) * 0.052,
+    ]);
+    prong.rotation.set(Math.cos(a) * 0.42, -a, Math.sin(a) * -0.42); // splay outward, tips leaning in
+  }
+
+  // ---- Floating crystal ----
+  // Parented to its own pivot so it can bob and turn under its own power, independent of the
+  // staff's sway/animation. Sits clear above the prong tips; `beamAttach` points at the crystal
+  // itself, so the channel beam still leaves from exactly where the glow is.
+  const crystalPivot = new THREE.Group();
+  crystalPivot.position.set(0.02, CRADLE_Y + 0.19, 0.014);
+  group.add(crystalPivot);
+
+  const orbMat = stdMat(0x2a0a22, {
+    emissive: WARLOCK_BEAM_COLOR,
+    emissiveIntensity: WARLOCK_BASE_EMISSIVE,
+    roughness: 0.15,
+    metalness: 0.1,
+  });
+  // Elongated octahedron reads as a cut gem rather than a ball.
+  const orb = addMesh(crystalPivot, new THREE.OctahedronGeometry(0.085, 0), orbMat, [0, 0, 0]);
+  orb.scale.set(1, 1.45, 1);
+
+  // Small shards orbiting the crystal, also on the pivot so they turn with it.
+  const shardMat = stdMat(0x7a1fbf, { emissive: 0x9a2fd6, emissiveIntensity: 0.6, roughness: 0.25 });
+  const shardGeo = new THREE.OctahedronGeometry(0.022, 0);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const shard = addMesh(crystalPivot, shardGeo, shardMat, [
+      Math.cos(a) * 0.082,
+      Math.sin(a * 1.7) * 0.03,
+      Math.sin(a) * 0.082,
+    ]);
+    shard.scale.set(1, 1.6, 1);
+  }
+
+  // Parented to the pivot, not the staff, so the glow travels with the floating crystal instead
+  // of hanging in the air where it started.
+  const orbLight = addLight(crystalPivot, WARLOCK_BEAM_COLOR, new THREE.Vector3(0, 0, 0));
+
+  // The crystal is deliberately NOT uniformly scaled (1, 1.45, 1 reads as a cut gem, not a ball),
+  // so every pulse below scales RELATIVE to that — setScalar would silently round it back into a
+  // sphere the first time it glowed.
+  const ORB_ASPECT = new THREE.Vector3(1, 1.45, 1);
+  const pulseOrb = (k: number): void => { orb.scale.copy(ORB_ASPECT).multiplyScalar(k); };
+
+  let channelGlow = 0, localT = 0, floatT = 0;
+
+  return {
+    group, basePos, baseRot, baseScale: WARLOCK_SCALE, weight: 0.35, light: orbLight, beamAttach: orb,
+    setFlash(flash01, big) {
+      const mul = big ? 2.2 : 1;
+      orbMat.emissiveIntensity = WARLOCK_BASE_EMISSIVE + flash01 * 2.2 * mul;
+      pulseOrb(1 + flash01 * 0.5 * mul);
+      orbLight.intensity = BASE_LIGHT_INTENSITY + flash01 * 0.9 * mul;
+    },
+    continuous(dt, ctx) {
+      const channeling = ctx.channelId === 'soulSiphon';
+      // The crystal is always alive: it turns steadily and bobs in its cradle even at rest, which
+      // is what sells "floating" rather than "mounted". Channelling just makes it spin up.
+      floatT += dt;
+      crystalPivot.rotation.y += dt * (0.8 + ctx.channelRamp01 * 4.5);
+      crystalPivot.rotation.x = Math.sin(floatT * 0.9) * 0.12;
+      crystalPivot.position.y = CRADLE_Y + 0.19 + Math.sin(floatT * 1.6) * 0.018;
+      channelGlow += ((channeling ? 1 : 0) - channelGlow) * Math.min(1, dt * 8);
+      orbMat.emissiveIntensity = WARLOCK_BASE_EMISSIVE + channelGlow * (0.9 + ctx.channelRamp01 * 2.4);
+      pulseOrb(1 + channelGlow * 0.12 + ctx.channelRamp01 * 0.3);
+      orbLight.intensity = BASE_LIGHT_INTENSITY + channelGlow * (0.3 + ctx.channelRamp01 * 0.7);
+      if (channeling) {
+        localT += dt;
+        const tremor = Math.sin(localT * 42) * 0.0035 * (0.3 + ctx.channelRamp01);
+        group.position.x += tremor;
+        group.rotation.z += tremor * 2.2;
+      }
+      // Draw (or hide) the persistent world-space beam from the crystal tip to wherever the
+      // channel currently ends (an enemy, a blocked-by-cover point, or max range).
+      R.camera.updateWorldMatrix(true, true);
+      orb.getWorldPosition(beamFromScratch);
+      updateChannelBeam(channeling && !!actionState.channelEndPoint, beamFromScratch, actionState.channelEndPoint ?? undefined, WARLOCK_BEAM_COLOR);
+    },
+  };
+}
+
 /** class id -> rig builder. Add a class here (and nowhere else in this file) to give it a
  *  first-person model; an id with no entry falls back to the mage staff. */
 const RIG_BUILDERS: Record<string, () => ViewmodelRig> = {
@@ -383,6 +562,7 @@ const RIG_BUILDERS: Record<string, () => ViewmodelRig> = {
   warrior: buildWarriorRig,
   archer: buildArcherRig,
   tank: buildTankRig,
+  warlock: buildWarlockRig,
 };
 
 // Grapple rope scratch (module scope: reused every frame, never allocated in the loop).
@@ -435,6 +615,7 @@ export function initViewmodel(game: GameState): void {
       }
       if (!visible || !p) {
         ropeMesh.visible = false;
+        updateChannelBeam(false);
         return;
       }
       if (!lookInit) {
@@ -489,7 +670,17 @@ export function initViewmodel(game: GameState): void {
 
       const justReleased = actionState.releasedAt !== lastReleasedAt && actionState.releasedAt >= 0;
       lastReleasedAt = actionState.releasedAt;
-      active.continuous?.(dt, { charge01: actionState.charge01, chargingId: actionState.chargingId, justReleased });
+      // Default the channel beam off before letting the active rig's own continuous() (if any)
+      // turn it back on — guards against it getting stuck visible if the player stops being a
+      // warlock (or stops being visible) on the very frame a channel was live.
+      updateChannelBeam(false);
+      active.continuous?.(dt, {
+        charge01: actionState.charge01,
+        chargingId: actionState.chargingId,
+        justReleased,
+        channelId: actionState.channelId,
+        channelRamp01: actionState.channelRamp01,
+      });
 
       castFlash = Math.max(0, castFlash - dt / FLASH_DECAY);
       active.setFlash(castFlash, castBig);

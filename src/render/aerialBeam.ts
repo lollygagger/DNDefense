@@ -61,3 +61,64 @@ export function updateBeams(dt: number): void {
     (b.mesh.material as THREE.MeshBasicMaterial).opacity = 0.6 * (b.life / b.maxLife);
   }
 }
+
+// ---------- Persistent channel beam (the Warlock's Soul Siphon, and any future channel) ----------
+// Unlike the pooled, fade-and-die beams above (spawnBeam/updateBeams — right for a one-shot flash
+// like the dragon's breath), a channel needs ONE beam repositioned every frame for as long as it's
+// held. Spawning a fresh pooled beam every render frame would blow straight past MAX_BEAMS and
+// read as flicker (several independently-fading copies stacked on top of each other) rather than
+// a steady line. So this is a single lazily-created, reused-forever mesh instead — the same
+// "grow/hold/reposition in place" idea fx.ts's own ground fields use, just for a segment instead
+// of a disc. Driven from viewmodel.ts's render loop (camera-space origin, world-space endpoint),
+// not from a sim event, since a channel's origin is the rig's own muzzle point every frame.
+let channelMesh: THREE.Mesh | null = null;
+const CHANNEL_UP = new THREE.Vector3(0, 1, 0);
+const channelDir = new THREE.Vector3();
+
+function ensureChannelMesh(): THREE.Mesh {
+  if (!channelMesh) {
+    channelMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, 1, 8, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xff2fb8,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    channelMesh.frustumCulled = false;
+    channelMesh.visible = false;
+    R.scene.add(channelMesh);
+  }
+  return channelMesh;
+}
+
+/** Show (and reposition) or hide the persistent channel beam. `active=false` (or a missing
+ *  endpoint) just hides it — the mesh itself lives for the rest of the game, never recreated.
+ *  Safe to call every render frame unconditionally. */
+export function updateChannelBeam(
+  active: boolean,
+  from?: THREE.Vector3,
+  to?: THREE.Vector3,
+  color?: number
+): void {
+  const mesh = ensureChannelMesh();
+  if (!active || !from || !to) {
+    mesh.visible = false;
+    return;
+  }
+  channelDir.copy(to).sub(from);
+  const dist = channelDir.length();
+  if (dist < 0.05) {
+    mesh.visible = false;
+    return;
+  }
+  channelDir.divideScalar(dist);
+  mesh.visible = true;
+  if (color !== undefined) (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
+  mesh.position.copy(from).addScaledVector(channelDir, dist / 2);
+  mesh.scale.set(1, dist, 1);
+  mesh.quaternion.setFromUnitVectors(CHANNEL_UP, channelDir);
+}

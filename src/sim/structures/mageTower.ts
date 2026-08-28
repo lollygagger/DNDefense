@@ -32,11 +32,27 @@ const cfg: SpawnerConfig = {
     const slowPctBonus = c2 ? MAGE_TOWER.upgrades.chill2.slowPctBonus : c1 ? MAGE_TOWER.upgrades.chill1.slowPctBonus : 0;
     const durationBonus = c2 ? MAGE_TOWER.upgrades.chill2.durationBonus : c1 ? MAGE_TOWER.upgrades.chill1.durationBonus : 0;
 
+    // High tier (600g/1600g, independent of overload/chill/reinforcedSpire): Arcane Residue
+    // (lingering ground DoT, sim/allyAI.ts's fireAt) vs Twin Casting (an extra bolt at a second
+    // target, stepRangedOrCaster), mutually exclusive.
+    const res2 = purchased.includes('arcaneResidue2');
+    const res1 = purchased.includes('arcaneResidue1');
+    const residue = res2 ? MAGE_TOWER.upgrades.arcaneResidue2 : res1 ? MAGE_TOWER.upgrades.arcaneResidue1 : null;
+
+    const twin2 = purchased.includes('twinCasting2');
+    const twin1 = purchased.includes('twinCasting1');
+    const twin = twin2 ? MAGE_TOWER.upgrades.twinCasting2 : twin1 ? MAGE_TOWER.upgrades.twinCasting1 : null;
+
     return {
       damage: base.damage * damageMult,
       aoeRadius: (base.aoeRadius ?? 0) * aoeMult,
       slowPct: Math.min(90, (base.slowPct ?? 0) + slowPctBonus),
       slowDuration: (base.slowDuration ?? 0) + durationBonus,
+      lingerDps: residue?.lingerDps,
+      lingerDuration: residue?.lingerDuration,
+      lingerRadius: residue?.lingerRadius,
+      extraBoltCount: twin?.extraBoltCount,
+      extraBoltDamageMult: twin?.extraBoltDamageMult,
     };
   },
 };
@@ -84,6 +100,37 @@ export const mageTowerDef: StructureDef = {
       desc: '+1 max mage — an independent second caster, whichever style you picked.',
       cost: MAGE_TOWER.upgrades.reinforcedSpire.cost,
       requires: null,
+    },
+    // ---- High tier: a second, independent branch point, not gated behind overload/chill/spire.
+    {
+      id: 'arcaneResidue1',
+      name: 'Arcane Residue',
+      desc: 'Each blast leaves a lingering scorched patch: 16 dmg/s for 3s where it hit.',
+      cost: MAGE_TOWER.upgrades.arcaneResidue1.cost,
+      requires: null,
+      excludes: ['twinCasting1'],
+    },
+    {
+      id: 'arcaneResidue2',
+      name: 'Arcane Blight',
+      desc: '28 dmg/s for 4.5s, over a wider patch — the ground itself keeps fighting after the bolt is gone.',
+      cost: MAGE_TOWER.upgrades.arcaneResidue2.cost,
+      requires: 'arcaneResidue1',
+    },
+    {
+      id: 'twinCasting1',
+      name: 'Twin Casting',
+      desc: 'The tower now also fires a second, weaker bolt (50% damage) at a nearby second target the instant it casts — one spell, two targets.',
+      cost: MAGE_TOWER.upgrades.twinCasting1.cost,
+      requires: null,
+      excludes: ['arcaneResidue1'],
+    },
+    {
+      id: 'twinCasting2',
+      name: 'Triple Casting',
+      desc: 'A third bolt joins in (65% damage each) — the tower answers a whole cluster instead of committing to one target.',
+      cost: MAGE_TOWER.upgrades.twinCasting2.cost,
+      requires: 'twinCasting1',
     },
   ] satisfies UpgradeNode[],
   create(socket: Socket, game: GameState): StructureInstance {

@@ -77,11 +77,25 @@ export const WAVES: WaveDef[] = [
   },
 ];
 
-/** Endless scaling (wave n > 10). Multipliers applied per docs/GAME_DESIGN.md. */
+/** Endless scaling (wave n > 10). Multipliers applied per docs/GAME_DESIGN.md.
+ *
+ *  goldGrowth retuned 0.05 -> 0.09 (late-game ability Mastery task, 2026-08-27). The enemy
+ *  "threat pool" a player has to burn through each wave is count×hp = (1+countGrowth·k)×
+ *  (1+hpGrowth·k), which at goldGrowth=0.05 badly outpaced kill-gold income
+ *  (count×gold = (1+countGrowth·k)×(1+goldGrowth·k)): at wave 20/30/40 the threat pool sits at
+ *  5.5x/13.6x/25x baseline while income was only tracking 2.5x/4.0x/5.5x — i.e. gold income was
+ *  hard-capped relative to an unbounded threat curve, which is the root cause the Mastery trees'
+ *  many-hundred-to-low-thousand-gold price tags would otherwise be unreachable against. 0.09
+ *  brings income to ~4.75x/11.2x/20.35x at those same waves — close enough to the threat curve
+ *  that a dedicated player can actually afford deep Mastery investments by the time the game
+ *  demands them, while staying far enough below 1:1 that the escalating-difficulty curve this
+ *  whole endless mode is built on stays real (matching goldGrowth to hpGrowth exactly would have
+ *  made gold income scale in perfect lockstep with the threat pool, i.e. remove the tension
+ *  entirely — see the ability-mastery task report for the full math). */
 export const ENDLESS = {
   countGrowth: 0.15, // count × (1 + growth·(n−10))
   hpGrowth: 0.12,
-  goldGrowth: 0.05,
+  goldGrowth: 0.09,
   speedGrowthPerWave: 0.01,
   speedCap: 1.3,
 };

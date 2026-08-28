@@ -40,6 +40,9 @@ const RETICLE_COLORS: Record<string, number> = {
   leap: 0xe08a3c,
   grapple: 0x3ea373, // archer: bow-gem teal
   shieldSlam: 0xffd23f, // tank: shield-boss amber
+  curseOfAgony: 0xd63fe0, // warlock: sickly curse violet
+  abyssalGrasp: 0x7a3fe0, // warlock: void-rift indigo
+  voidstep: 0x9a2fb0, // warlock: void-step magenta
 };
 const RETICLE_DEFAULT_COLOR = 0xd6c9ff;
 const FLASH_COLOR = 0xff3344;
@@ -202,6 +205,14 @@ export function initCasting(game: GameState): void {
   let autoFiringId: string | null = null;
   let mouseDown = false; // raw LMB physical state, needed because auto-fire has no per-shot event
 
+  // Hold-to-channel state for a primary whose current-rank stats carry a truthy `channel` flag
+  // (see actionState.ts's channelId doc comment). Generic mechanism, same shape as `autoFire`:
+  // mousedown fires the first tick immediately (no draw to complete first) and starts refiring
+  // every tick tryCast's own cooldown allows, for as long as LMB stays down. Everything about
+  // WHAT the channel actually does (ramp, target lock, cover) is entirely the owning ability's
+  // own cast() (see data/warlock.ts) — nothing here is Warlock-specific.
+  let channelingId: string | null = null;
+
   const disarm = (): void => {
     armed = null;
   };
@@ -228,6 +239,18 @@ export function initCasting(game: GameState): void {
     autoFiringId = null;
     actionState.chargingId = null;
     actionState.charge01 = 0;
+    setMoveSpeedMultiplier(1);
+  };
+
+  /** End a hold-to-channel primary (see channelingId above), for any reason — release, cancel,
+   *  or interruption. Mirrors endDraw()'s shape exactly: resets every bit of presentation state
+   *  the channel touches (actionState.channelId/channelRamp01/channelEndPoint, the move-speed
+   *  penalty) and is unconditional/idempotent. Does not fire a final tick. */
+  const endChannel = (): void => {
+    channelingId = null;
+    actionState.channelId = null;
+    actionState.channelRamp01 = 0;
+    actionState.channelEndPoint = null;
     setMoveSpeedMultiplier(1);
   };
 
@@ -290,6 +313,20 @@ export function initCasting(game: GameState): void {
     const def = player.classDef.primary;
     if ((player.cooldowns[def.id] ?? 0) > game.time) return; // silent: HUD cooldown ring already shows this
 
+    const primaryStats = getAbilityStats(player, def.id);
+    if (primaryStats.channel) {
+      // Hold-to-channel (see the channelingId doc comment above): unlike a draw, there's nothing
+      // to wind up — fire the first tick right now, then let tick() below keep refiring every
+      // tick the ability's own cooldown allows for as long as LMB stays down.
+      channelingId = def.id;
+      mouseDown = true;
+      actionState.channelId = def.id;
+      actionState.channelRamp01 = 0;
+      setMoveSpeedMultiplier(primaryStats.moveSpeedMult ?? 1);
+      castAimed(player, def);
+      return;
+    }
+
     if (def.charge) {
       // Hold-to-draw: mousedown only starts the draw. tryCast (and its cooldown) fires on
       // release — see the mouseup listener below — unless the ability's current rank has
@@ -307,10 +344,15 @@ export function initCasting(game: GameState): void {
     castAimed(player, def);
   });
 
-  // ---------- mouse: release a hold-to-draw primary (or stop an auto-fire loop) ----------
+  // ---------- mouse: release a hold-to-draw primary (or stop a channel/auto-fire loop) ----------
   window.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return;
     mouseDown = false;
+    if (channelingId !== null) {
+      // The last tick already fired from tick()/the mousedown above — releasing just stops it.
+      endChannel();
+      return;
+    }
     if (autoFiringId !== null) {
       // Already firing every tick at full power — releasing just stops it. The most recent
       // shot already fired from tick(), so there's nothing left to loose here.
@@ -370,24 +412,37 @@ export function initCasting(game: GameState): void {
     }
   });
 
-  // ---------- disarm / cancel-draw triggers ----------
+  // ---------- disarm / cancel-draw/channel triggers ----------
   game.events.on('player:died', () => {
     disarm();
     endDraw();
+    endChannel();
   });
   game.events.on('phase:changed', ({ phase }) => {
     if (phase === 'gameover') disarm();
     endDraw(); // any phase change (build<->combat too) cancels an in-progress draw
+    endChannel(); // ...and an in-progress channel, same reasoning
   });
 
   // ---------- reticle render + live draw state ----------
   game.addSystem({
-    // Auto-fire's actual sim mutation (tryCast, via fireAuto/castAimed) belongs in tick(), not
-    // render() — render() only ever reads sim state (see ARCHITECTURE.md's sim/render rule).
-    // Self-contained: re-checks canAct() itself rather than trusting the render loop below to
-    // catch a menu-open/death/phase-change in time, since tick() and render() run on different
-    // cadences (fixed-step sim vs rAF) and a mid-autofire menu open must stop shots immediately.
+    // Auto-fire/channel's actual sim mutation (tryCast, via fireAuto/castAimed) belongs in
+    // tick(), not render() — render() only ever reads sim state (see ARCHITECTURE.md's
+    // sim/render rule). Self-contained: re-checks canAct() itself rather than trusting the
+    // render loop below to catch a menu-open/death/phase-change in time, since tick() and
+    // render() run on different cadences (fixed-step sim vs rAF) and a mid-hold menu open must
+    // stop casting immediately.
     tick() {
+      if (channelingId !== null) {
+        if (!mouseDown || !canAct()) {
+          endChannel();
+          return;
+        }
+        const player = game.localPlayer!;
+        const def = getAbilityDef(player.classDef, channelingId);
+        if (def) castAimed(player, def); // tryCast's own cooldown gates the actual tick rate
+        return;
+      }
       if (!mouseDown || (drawingId === null && autoFiringId === null)) return;
       if (!canAct()) {
         endDraw();
@@ -420,6 +475,11 @@ export function initCasting(game: GameState): void {
       // While autoFiringId is set (rather than drawingId), charge01/chargingId are already
       // pinned at {id, 1} from the moment of transition and need no further per-frame update —
       // tick() above is what actually fires the shots.
+      // Same backstop for an in-progress channel — its actual ramp/end-point come from the
+      // ability's own sim-side cast() (tick() above), not from here; this only guards against a
+      // menu/lost-pointer-lock interruption render() notices before tick() gets a chance to.
+      if (channelingId !== null && !canAct()) endChannel();
+
       if (drawingId !== null || autoFiringId !== null) {
         if (!canAct()) {
           endDraw();

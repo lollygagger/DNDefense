@@ -4,6 +4,7 @@ import { CLASS_REGISTRY } from '../data/classRegistry';
 import { allAbilities } from '../sim/classes';
 import { setSelectedClass } from '../player/classSelect';
 import { escapeHtml, overlayClosed, overlayOpened } from './hud';
+import { isPlaygroundMode, setPlaygroundMode } from './playground';
 
 /** Owned by [ui]. Two full-screen overlays appended into #ui:
  *   - start screen: shown on boot while phase === 'menu'. Title, class select,
@@ -24,7 +25,7 @@ import { escapeHtml, overlayClosed, overlayOpened } from './hud';
  *  classSelect.ts's contract and in case a future refactor makes controller.ts's read of it
  *  meaningful (e.g. a respawn/reconnect flow). */
 
-const CLASS_ICONS: Record<string, string> = { mage: '🧙', warrior: '🛡️', archer: '🏹', tank: '🧱' };
+const CLASS_ICONS: Record<string, string> = { mage: '🧙', warrior: '🛡️', archer: '🏹', tank: '🧱', warlock: '🔮' };
 function classIcon(id: string): string {
   return CLASS_ICONS[id] ?? '⚔️';
 }
@@ -107,6 +108,11 @@ function startScreenHtml(selectedId: string | null): string {
       <div class="controls-ref">${controlsHtml()}</div>
     </section>
 
+    <label id="playground-toggle" title="Unlimited gold, jump to any wave, max out your kit. For testing — not a scored run.">
+      <input type="checkbox" id="playground-check" />
+      <span>🧪 Playground mode — unlimited gold, wave select, instant upgrades</span>
+    </label>
+
     <button id="enter-keep-btn" class="btn-primary btn-enter" type="button">⚔️ Enter the Keep</button>
   </div>`;
 }
@@ -138,6 +144,10 @@ export function initScreens(game: GameState): void {
   const gameoverScreen = document.getElementById('gameover-screen')!;
   const classSelect = document.getElementById('class-select')!;
   const enterBtn = document.getElementById('enter-keep-btn')!;
+  const playgroundCheck = document.getElementById('playground-check') as HTMLInputElement;
+  // Reflect a ?playground URL opt-in back into the checkbox so the two never disagree.
+  playgroundCheck.checked = isPlaygroundMode();
+  playgroundCheck.addEventListener('change', () => setPlaygroundMode(playgroundCheck.checked));
   const tryAgainBtn = document.getElementById('try-again-btn')!;
 
   // ---------- start screen ----------

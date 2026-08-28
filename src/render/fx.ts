@@ -175,9 +175,50 @@ export function spawnRing(pos: THREE.Vector3, radius: number, color: number, lif
 
 // ---------- Lingering ground fields (Frost Field, Ground Slam, Leap landing) ----------
 
-/** A disc + pulsing rim that grows to `radius`, holds for the bulk of `duration`, then fades —
- *  unlike `spawnRing` (a one-shot flash), the boundary stays visible the whole time it matters.
- *  Used by Frost Field's slow zone and Ground Slam's stagger window. */
+/** GROUND EFFECT VISUAL LANGUAGE (ability-clarity task, 2026-08-27). Before this, every lingering
+ *  zone was the same disc-that-grows-then-fades shape with only its color changed — a slow field,
+ *  a damage field, and a pure-stun ring all read as "the same tinted circle," which is exactly
+ *  the clarity problem this task exists to fix. Every `spawnField` call now names one of four
+ *  styles (`FieldStyle`, below), each with its own palette family AND its own animation register
+ *  — not color alone, so it still reads correctly for colorblind players and at the distance a
+ *  horde is usually fought from:
+ *   - `damage` (warm ember: flamethrower, Volcanic/Molten Rupture, Withering Beam residue) — a
+ *     steady, medium-speed glow. Reads as "the ground itself still hurts."
+ *   - `slow` (cool ice: Frost Field, Permafrost/Eternal Frost, Killing Frost) — a slower, gentler
+ *     pulse. Reads as "you'll be slow here," with nothing suggesting ongoing damage.
+ *   - `control` (bright flash-in: Ground Slam's stagger, Shield Slam's stun, Fireball rank V's
+ *     bonus stun ring — all three push the shared 'slam' kind) — grows almost instantly instead
+ *     of over ~25% of its duration, with a fast, high-amplitude pulse. Reads as "something just
+ *     landed here, hard," distinct from the other styles' steadier "standing zone" read — and
+ *     reinforces the per-enemy stun flash (render/enemyView.ts) at the location it happened.
+ *   - `mark` (corrupted violet: Curse of Agony) — its own eerie palette, separate from plain
+ *     damage, so "this also makes you take more damage" reads as its own category rather than
+ *     just another color of "this hurts."
+ *  Any FUTURE ground effect should reuse one of these four rather than inventing a fifth — pick
+ *  by what the zone actually DOES (damage / slow / control / mark), not by which ability it
+ *  belongs to. `zoneBurn`/`zoneSlow` below are the generic fallback every `spawnGroundEffect()`
+ *  call (sim/abilityEffects.ts) gets automatically, so a new damage-or-slow zone is never
+ *  invisible even before anyone hand-authors it a dedicated look.
+ *
+ *  A disc + pulsing rim that grows to `radius`, holds for the bulk of `duration`, then fades —
+ *  unlike `spawnRing` (a one-shot flash), the boundary stays visible the whole time it matters. */
+type FieldStyle = 'damage' | 'slow' | 'control' | 'mark';
+
+interface FieldStyleParams {
+  fillOpacity: number;
+  rimPulseBase: number;
+  rimPulseAmp: number;
+  rimPulseSpeed: number; // radians/sec
+  growFrac: number; // fraction of `duration` spent growing in (before the 0.35s cap below)
+}
+
+const FIELD_STYLES: Record<FieldStyle, FieldStyleParams> = {
+  damage: { fillOpacity: 0.16, rimPulseBase: 0.55, rimPulseAmp: 0.14, rimPulseSpeed: 2.4, growFrac: 0.25 },
+  slow: { fillOpacity: 0.13, rimPulseBase: 0.55, rimPulseAmp: 0.1, rimPulseSpeed: 1.3, growFrac: 0.25 },
+  control: { fillOpacity: 0.12, rimPulseBase: 0.62, rimPulseAmp: 0.3, rimPulseSpeed: 6, growFrac: 0.05 },
+  mark: { fillOpacity: 0.15, rimPulseBase: 0.5, rimPulseAmp: 0.16, rimPulseSpeed: 1.9, growFrac: 0.25 },
+};
+
 interface Field {
   disc: THREE.Mesh;
   rim: THREE.Mesh;
@@ -186,16 +227,37 @@ interface Field {
   targetRadius: number;
   growTime: number;
   fadeTime: number;
+  fillOpacity: number;
+  rimPulseBase: number;
+  rimPulseAmp: number;
+  rimPulseSpeed: number;
 }
 
 const fields: Field[] = [];
 const MAX_FIELDS = 8;
 
-function spawnField(pos: THREE.Vector3, radius: number, color: number, duration: number): void {
+/** `style` is required (not defaulted) so every call site has to be a deliberate pick from the
+ *  language above. `opacityMul` (default 1) is only for the generic `zoneBurn`/`zoneSlow`
+ *  fallback — drawn lighter than a hand-authored ring of the same style, since a couple of
+ *  existing abilities already push their own richer visual for the same zone (see
+ *  sim/abilityEffects.ts's spawnGroundEffect doc comment for the full trade-off). */
+function spawnField(
+  pos: THREE.Vector3,
+  radius: number,
+  color: number,
+  duration: number,
+  style: FieldStyle,
+  opacityMul = 1,
+): void {
   if (fields.length >= MAX_FIELDS) return;
+  const p = FIELD_STYLES[style];
+  const fillOpacity = p.fillOpacity * opacityMul;
+  const rimPulseBase = p.rimPulseBase * opacityMul;
+  const rimPulseAmp = p.rimPulseAmp * opacityMul;
+
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(1, 40),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: fillOpacity, depthWrite: false, side: THREE.DoubleSide }),
   );
   disc.rotation.x = -Math.PI / 2;
   disc.position.set(pos.x, pos.y + 0.05, pos.z);
@@ -204,16 +266,28 @@ function spawnField(pos: THREE.Vector3, radius: number, color: number, duration:
 
   const rim = new THREE.Mesh(
     new THREE.RingGeometry(0.92, 1, 48),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: rimPulseBase, depthWrite: false, side: THREE.DoubleSide }),
   );
   rim.rotation.x = -Math.PI / 2;
   rim.position.set(pos.x, pos.y + 0.07, pos.z);
   rim.scale.setScalar(0.001);
   R.scene.add(rim);
 
-  const growTime = Math.min(0.35, duration * 0.25);
+  const growTime = Math.min(0.35, duration * p.growFrac);
   const fadeTime = Math.min(0.5, duration * 0.3);
-  fields.push({ disc, rim, life: duration, totalLife: duration, targetRadius: radius, growTime, fadeTime });
+  fields.push({
+    disc,
+    rim,
+    life: duration,
+    totalLife: duration,
+    targetRadius: radius,
+    growTime,
+    fadeTime,
+    fillOpacity,
+    rimPulseBase,
+    rimPulseAmp,
+    rimPulseSpeed: p.rimPulseSpeed,
+  });
 }
 
 // ---------- Real-radius lookup for AoE impacts ----------
@@ -285,7 +359,7 @@ const IMPACT_EFFECTS: Record<string, ImpactFn> = {
   flame: (imp) => {
     spawnBurst(imp.pos, 0xff7a1e, 14, 5, 0.3, { upMin: 0.3, upMax: 1, gravity: -2, size: 0.44 });
     spawnBurst(imp.pos, 0xffd66b, 6, 3, 0.22, { upMin: 0.4, upMax: 1.1, gravity: -4, size: 0.3 });
-    if (imp.radius) spawnField(imp.pos, imp.radius, 0xff6a2a, imp.duration ?? 0.4);
+    if (imp.radius) spawnField(imp.pos, imp.radius, 0xff6a2a, imp.duration ?? 0.4, 'damage');
   },
   // Arc lightning: a hard, instantaneous white-hot spark. No ring and no lingering anything —
   // the chain's readability comes from several of these popping in sequence across the targets
@@ -333,7 +407,7 @@ const IMPACT_EFFECTS: Record<string, ImpactFn> = {
     if (imp.aoe) {
       const { radius, duration = 4 } = rankVisual(game, 'frostField', imp);
       spawnBurst(imp.pos, 0xbdeeff, 16, 4, 0.4, { upMin: 0.1, upMax: 0.6, gravity: 4, size: 0.3 });
-      spawnField(imp.pos, radius, 0x7fd8ff, duration);
+      spawnField(imp.pos, radius, 0x7fd8ff, duration, 'slow');
     } else {
       spawnBurst(imp.pos, 0x9fe4ff, 9, 3.5, 0.3, { upMin: 0.2, upMax: 0.8, gravity: 6, size: 0.26 });
     }
@@ -343,11 +417,16 @@ const IMPACT_EFFECTS: Record<string, ImpactFn> = {
   slash: (imp) => {
     spawnBurst(imp.pos, 0xf2f2f2, 12, 7, 0.18, { upMin: 0.05, upMax: 0.3, gravity: 2, size: 0.3 });
   },
-  // Ground Slam: earthy shockwave burst + a lingering field at the real radius/stagger window.
+  // Control zone: earthy shockwave burst + a bright flash-in field at the real radius/CC window,
+  // using the 'control' style (see the visual-language doc above spawnField) — a fast, sharp
+  // read shared by every ability that pushes this kind (Ground Slam's stagger, Shield Slam's
+  // stun, Fireball rank V's bonus stun ring), reinforcing the per-enemy stun flash
+  // (render/enemyView.ts) at the location it happened rather than reading as a standing hazard.
   slam: (imp, game) => {
     const { radius, duration = 1.2 } = rankVisual(game, 'groundSlam', imp);
     spawnBurst(imp.pos, 0xcaa06a, 20, 7, 0.4, { upMin: 0.1, upMax: 0.5, gravity: 20, size: 0.3 });
-    spawnField(imp.pos, radius, 0xd98a4a, duration);
+    spawnRing(imp.pos, radius, 0xffe066, 0.28);
+    spawnField(imp.pos, radius, 0xd98a4a, duration, 'control');
   },
   // Leap: small dust puff on takeoff; a bigger vertical dust plume + real-radius ring on
   // landing (vs Ground Slam's flatter shockwave).
@@ -373,6 +452,50 @@ const IMPACT_EFFECTS: Record<string, ImpactFn> = {
   // Second Wind: slow-rising warm motes around the caster — a heal glow, not a combat impact.
   secondWind: (imp) => {
     spawnBurst(imp.pos, 0xff8fa3, 14, 2.2, 0.7, { upMin: 0.8, upMax: 1.3, gravity: -2, size: 0.3 });
+  },
+  // Warlock's Soul Siphon beam hit: a tight magenta spark where the beam actually lands each
+  // tick. Deliberately a point, not a ring — a continuous channel reads better as one bright
+  // contact spark than a repeated flash-and-fade every ~0.15s.
+  soulSiphon: (imp) => {
+    spawnBurst(imp.pos, 0xff2fb8, 6, 3, 0.18, { upMin: 0.1, upMax: 0.5, gravity: 10, size: 0.22 });
+  },
+  // Curse of Agony: a sickly violet field at the real radius/duration the sim applied — the
+  // 'mark' style (damage + "you take extra damage" together), in the Warlock's own hue.
+  curse: (imp) => {
+    const radius = imp.radius ?? 5;
+    spawnBurst(imp.pos, 0xd63fe0, 16, 4, 0.4, { upMin: 0.1, upMax: 0.6, gravity: 6, size: 0.3 });
+    spawnField(imp.pos, radius, 0xc02fd6, imp.duration ?? 5, 'mark');
+  },
+  // Generic ground-zone fallback: every sim/abilityEffects.ts spawnGroundEffect() call pushes one
+  // of these two automatically (see that function's doc comment), sized to the exact radius/
+  // duration/dps-or-slow it was given, so a lingering damage or slow zone can never go invisible
+  // or outlive its own indicator — this is what currently makes Volcanic/Molten Rupture's burning
+  // crater and the Warlock's Withering/Blighted Beam residue visible at all, and what keeps Frost
+  // Field's Permafrost/Eternal Frost lingering chill on screen for its real, longer duration
+  // instead of vanishing when the main slow's own ring does. Drawn lighter (opacityMul 0.6) than
+  // a hand-authored ring of the same style, since a couple of callers (Curse of Agony above, the
+  // ally Mage Tower's Arcane Residue) already push their own richer visual for the same zone —
+  // this one just adds quiet reinforcement there instead of competing with it.
+  zoneBurn: (imp) => {
+    const radius = imp.radius ?? 3;
+    spawnField(imp.pos, radius, 0xff7a2a, imp.duration ?? 3, 'damage', 0.6);
+  },
+  zoneSlow: (imp) => {
+    const radius = imp.radius ?? 3;
+    spawnField(imp.pos, radius, 0x9fdcff, imp.duration ?? 3, 'slow', 0.6);
+  },
+  // Abyssal Grasp: an inward-converging burst reads as "pulled together," not blown apart — the
+  // opposite silhouette from every damage-nuke burst above.
+  grasp: (imp) => {
+    const radius = imp.radius ?? 5;
+    spawnBurst(imp.pos, 0x9a5cff, 20, 7, 0.35, { upMin: 0.15, upMax: 0.7, converge: true, size: 0.3 });
+    spawnRing(imp.pos, radius, 0x7a3fe0, 0.3);
+  },
+  // Voidstep: the same implode-on-departure/explode-on-arrival read as Blink, in the Warlock's
+  // magenta-void hue so it never gets mistaken for the Mage's own teleport at a glance.
+  voidstep: (imp) => {
+    spawnBurst(imp.pos, 0x9a2fb0, 16, 6, 0.3, { upMin: 0.2, upMax: 0.9, converge: true, size: 0.3 });
+    spawnRing(imp.pos, 1.4, 0xc23bff, 0.25);
   },
   // Bulwark (Tank): a brief brass/gold shield flare, not a lingering field — the ability itself
   // is a self-buff with no gameplay radius to size a ring from, so this is a fixed "moment" flash
@@ -547,8 +670,8 @@ export function initFx(game: GameState): void {
         const rad = Math.max(0.001, f.targetRadius * radiusT);
         f.disc.scale.setScalar(rad);
         f.rim.scale.setScalar(rad);
-        (f.disc.material as THREE.MeshBasicMaterial).opacity = 0.14 * opacityMul;
-        const pulse = 0.55 + Math.sin(elapsed * 3) * 0.12;
+        (f.disc.material as THREE.MeshBasicMaterial).opacity = f.fillOpacity * opacityMul;
+        const pulse = f.rimPulseBase + Math.sin(elapsed * f.rimPulseSpeed) * f.rimPulseAmp;
         (f.rim.material as THREE.MeshBasicMaterial).opacity = pulse * opacityMul;
       }
 

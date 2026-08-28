@@ -8,6 +8,7 @@ import {
   CROSSBOW_DEF_ID,
   FIELD_HOSPITAL_DEF_ID,
   FLAMETHROWER_DEF_ID,
+  getStructureDef,
   MAGE_TOWER_DEF_ID,
   TANK_BARRACKS_DEF_ID,
   type ArcLightningInstance,
@@ -47,6 +48,24 @@ export interface Rec {
   trimMesh?: THREE.Mesh;
   // mage tower / arc lightning: idle pulse on a glowing orb
   orbMesh?: THREE.Mesh;
+  // any hut-style spawner building: a second, brighter "has bought a 600g/1600g high tier" tell
+  // (late-game spawner-upgrades task, 2026-08-27) — distinct from trimMesh, which lights up on
+  // ANY purchase (even a cheap 70g one). See hasHighTier()/updateHutRec() below.
+  eliteMesh?: THREE.Mesh;
+}
+
+/** True once a structure owns any node from its late-game 600g/1600g high tier (late-game
+ *  spawner-upgrades task, 2026-08-27) — driven by the def's own upgrade cost rather than a
+ *  hardcoded id list, so this works for all five current spawners (and any future one) with no
+ *  per-building branching here: every high-tier node costs >=600g, every cheap-tier node costs
+ *  well under that (see data/structures.ts). */
+function hasHighTier(structure: StructureInstance): boolean {
+  const def = getStructureDef(structure.defId);
+  if (!def) return false;
+  return structure.purchased.some((id) => {
+    const node = def.upgrades.find((n) => n.id === id);
+    return (node?.cost ?? 0) >= 600;
+  });
 }
 
 export function initStructureView(game: GameState): void {
@@ -222,13 +241,25 @@ export function initStructureView(game: GameState): void {
 
   /** Every hut-style spawner building shares this: sit at the socket's ground position, show a
    *  little gold trim once any upgrade has been purchased. The Mage Tower additionally pulses
-   *  its finial orb so the tower reads as "active" even at a glance from across the courtyard. */
+   *  its finial orb so the tower reads as "active" even at a glance from across the courtyard.
+   *  A maxed-out 600g/1600g high tier gets a second, stronger tell on top of the trim — a
+   *  hovering, rotating crystal (eliteMesh, per-building color set in spawnerHuts.ts) that only
+   *  appears once hasHighTier() is true, so three visual states exist at a glance: fresh (bare
+   *  hut), cheap-upgraded (gold trim only), high-tier (trim + glowing crystal). */
   function updateHutRec(rec: Rec, structure: StructureInstance, socket: Socket, g: GameState): void {
     rec.group.position.copy(socket.worldPos);
     if (rec.trimMesh) rec.trimMesh.visible = structure.purchased.length > 0;
     if (rec.orbMesh) {
       const s = 1 + Math.sin(g.time * 2.4) * 0.12;
       rec.orbMesh.scale.setScalar(s);
+    }
+    if (rec.eliteMesh) {
+      const elite = hasHighTier(structure);
+      rec.eliteMesh.visible = elite;
+      if (elite) {
+        rec.eliteMesh.scale.setScalar(1 + Math.sin(g.time * 3) * 0.18);
+        rec.eliteMesh.rotation.y = g.time * 1.5;
+      }
     }
   }
 

@@ -1,10 +1,13 @@
 import { Vector3 } from 'three';
 import type { GameState } from '../sim/GameState';
-import type { AbilityDef, Enemy, PlayerClassDef, PlayerState } from '../sim/types';
+import type { Enemy, PlayerClassDef, PlayerState } from '../sim/types';
+import type { AbilityWithTree } from '../sim/abilityTree';
 import { applyDamageReduction } from '../sim/classes';
 import { applyStun } from '../sim/status';
-import { launchPlayer } from '../player/controller';
+import { dashPlayer } from '../player/controller';
 import { actionState } from '../player/actionState';
+import { applyShield, applyThorns, startDamageSweep, stopDamageSweep } from '../sim/abilityEffects';
+import { bulwarkTree, shieldBashTree, shieldChargeTree, shieldSlamTree } from './tankTree';
 
 /** Tank class definition. Owned by [player-classes]. Balance per docs/GAME_DESIGN.md.
  *  Identity: the highest HP in the game and the slowest boots, built to *stop* a swarm rather
@@ -17,8 +20,9 @@ import { actionState } from '../player/actionState';
  *  deliberately chains both cooldowns onto one target (e.g. a boss) still can't lock it down
  *  forever — see its doc comment for the exact mechanic. The primary and Bulwark deal zero
  *  crowd control on purpose: a class this tanky must not also be the best CC engine with no
- *  downside. cast() implementations are sim-side only: they scan game.enemies / mutate state,
- *  no rendering. */
+ *  downside — their late-game Mastery branches (data/tankTree.ts) add self-sustain instead of
+ *  CC, keeping that rule intact all the way to the deepest upgrades. cast() implementations are
+ *  sim-side only: they scan game.enemies / mutate state, no rendering. */
 
 // ---------- shared diminishing-returns stun helper ----------
 
@@ -53,7 +57,7 @@ function stunWithFatigue(e: Enemy, game: GameState, baseDuration: number): void 
 /** Melee "aimed" primary: cone scan in front of the caster, same generic pattern as the
  *  Warrior's Cleave — but narrower, shorter, slower, and noticeably weaker, since the Tank's
  *  primary is a chip-damage poke, not a damage identity. */
-const shieldBash: AbilityDef = {
+const shieldBash: AbilityWithTree = {
   id: 'shieldBash',
   name: 'Shield Bash',
   desc: 'A quick bash with your shield. Modest damage — your real tools are the ones on cooldown.',
@@ -66,6 +70,7 @@ const shieldBash: AbilityDef = {
     { cost: 80, stats: { damage: 21, range: 3.6 } },
     { cost: 140, stats: { damage: 28, range: 3.9 } },
   ],
+  tree: shieldBashTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
     let dx = aimPoint.x - origin.x;
     let dz = aimPoint.z - origin.z;
@@ -79,6 +84,7 @@ const shieldBash: AbilityDef = {
     }
     const cosHalfArc = Math.cos((stats.arcDeg * Math.PI) / 360);
     const rangeSq = stats.range * stats.range;
+    let hits = 0;
     for (const e of game.enemies) {
       if (!e.alive) continue;
       const ex = e.pos.x - origin.x;
@@ -90,6 +96,16 @@ const shieldBash: AbilityDef = {
       const within = dist < 1e-4 || (ex * dx + ez * dz) / dist >= cosHalfArc;
       if (!within) continue;
       e.takeDamage(stats.damage, game);
+      hits++;
+    }
+    if (hits > 0) {
+      // Riposte/Perfect Riposte: stacking self-mitigation scaled by how many you hit at once.
+      if (stats.reductionPerHitPct) {
+        const factor = Math.max(0.4, 1 - (stats.reductionPerHitPct * hits) / 100);
+        applyDamageReduction(caster, game, factor, stats.reductionDuration);
+      }
+      // Vanguard's Resolve/Fortitude: sustain via healing instead of mitigation.
+      if (stats.healPerHit) caster.hp = Math.min(caster.maxHp, caster.hp + stats.healPerHit * hits);
     }
     const fx = origin.x + dx * Math.min(stats.range, 2.2);
     const fz = origin.z + dz * Math.min(stats.range, 2.2);
@@ -100,7 +116,7 @@ const shieldBash: AbilityDef = {
 /** The CC centerpiece: a ground-target shockwave that damages and stuns everything in radius.
  *  Long cooldown relative to its own stun duration on purpose (see the module doc comment) —
  *  this is the "stop a cluster for a couple of seconds" button, not an on-demand lock. */
-const shieldSlam: AbilityDef = {
+const shieldSlam: AbilityWithTree = {
   id: 'shieldSlam',
   name: 'Shield Slam',
   desc: 'Slam your shield into the ground, damaging and stunning everything nearby.',
@@ -114,14 +130,38 @@ const shieldSlam: AbilityDef = {
     { cost: 80, stats: { damage: 52, stunDuration: 1.6 } },
     { cost: 140, stats: { damage: 70, radius: 4.2, stunDuration: 2.0 } },
   ],
+  tree: shieldSlamTree,
   cast(game: GameState, _caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
+    const radiusSq = stats.radius * stats.radius;
+    const hits: Enemy[] = [];
+    let closest: Enemy | null = null;
+    let closestSq = Infinity;
     for (const e of game.enemies) {
       if (!e.alive) continue;
       const dx = e.pos.x - aimPoint.x;
       const dz = e.pos.z - aimPoint.z;
-      if (dx * dx + dz * dz > stats.radius * stats.radius) continue;
-      e.takeDamage(stats.damage, game);
-      stunWithFatigue(e, game, stats.stunDuration);
+      const d2 = dx * dx + dz * dz;
+      if (d2 > radiusSq) continue;
+      hits.push(e);
+      if (d2 < closestSq) {
+        closestSq = d2;
+        closest = e;
+      }
+    }
+    // Concussive/Shattering Slam: stun scales with how many enemies the blast actually caught.
+    const bonusStun = stats.stunPerTarget
+      ? Math.min(stats.stunCap, stats.stunDuration + stats.stunPerTarget * (hits.length - 1))
+      : stats.stunDuration;
+    for (const e of hits) {
+      let dmg = stats.damage;
+      let stun = bonusStun;
+      // Focused/Executioner's Slam: the single closest target eats a big bonus on top.
+      if (stats.focusBonusDamage && e === closest) {
+        dmg += stats.focusBonusDamage;
+        stun += stats.focusStunBonus;
+      }
+      e.takeDamage(dmg, game);
+      stunWithFatigue(e, game, stun);
     }
     // Reuses Ground Slam's earthy-shockwave look — the closest fit in the frozen fx.ts kind
     // table for "a shield slammed into the ground" — at this ability's own real radius/duration.
@@ -130,7 +170,7 @@ const shieldSlam: AbilityDef = {
       kind: 'slam',
       aoe: true,
       radius: stats.radius,
-      duration: stats.stunDuration,
+      duration: bonusStun,
     });
   },
 };
@@ -139,7 +179,7 @@ const shieldSlam: AbilityDef = {
  *  sim/classes.ts's generic applyDamageReduction (any class could use it — it just happens
  *  that only the Tank does today). Differentiates from the Warrior's Second Wind: this
  *  mitigates the next few seconds of incoming damage instead of restoring HP already lost. */
-const bulwark: AbilityDef = {
+const bulwark: AbilityWithTree = {
   id: 'bulwark',
   name: 'Bulwark',
   desc: 'Brace behind your shield, sharply reducing incoming damage for a few seconds.',
@@ -152,29 +192,42 @@ const bulwark: AbilityDef = {
     { cost: 80, stats: { reductionPct: 60, duration: 5 } },
     { cost: 140, stats: { reductionPct: 70, duration: 6 } },
   ],
+  tree: bulwarkTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {
     applyDamageReduction(caster, game, 1 - stats.reductionPct / 100, stats.duration);
+    // Aegis/Bastion Overflow: a flat absorb shield on top of the percentage reduction.
+    if (stats.shieldAmount) applyShield(caster, game, stats.shieldAmount, stats.shieldDuration);
+    // Retaliation/Vengeful Retaliation: punish anyone still hitting you through the mitigation.
+    if (stats.thornsRadius) applyThorns(caster, game, stats.thornsRadius, stats.thornsDamage, stats.duration);
     game.projectiles.impacts.push({ pos: caster.pos.clone(), kind: 'bulwark', aoe: false });
   },
 };
 
-/** Mobility: an instant, directional shoulder charge — no reticle, no confirm click, same
- *  input shape as the Warrior's Leap (role: 'mobility' + targeting: 'aimed' so casting.ts
- *  fires it immediately on keypress). Built on the same launchPlayer() ballistic arc for the
- *  same reason Leap is: the controller owns gravity/ground-collision/the playfield clamp, so
- *  this cast() only ever has to pick a direction and a speed pair. A lower, flatter arc than
- *  Leap's (CHARGE_VSPEED=16 vs Leap's 18) reads as a barge rather than a jump, while still
- *  comfortably clearing the 6-unit wall: apex = 16^2/(2*14) ≈ 9.1. Slams down for damage AND
- *  a (weaker, fatigue-tracked) stun the instant it actually lands — the Tank's second, smaller
- *  CC source. */
-const CHARGE_VSPEED = 16;
-const shieldCharge: AbilityDef = {
+/** Mobility: an instant, directional shoulder charge — no reticle, no confirm click, same input
+ *  shape as the Warrior's Leap (role: 'mobility' + targeting: 'aimed', so casting.ts fires it
+ *  immediately on keypress).
+ *
+ *  Explicitly NOT a jump. This used to be a ballistic arc like Leap, which meant the Tank sailed
+ *  upward every time it charged — wrong for a shoulder-barge, and it made the two classes' mobility
+ *  feel like the same move. It now runs on dashPlayer(): a flat horizontal charge along the ground
+ *  with no vertical impulse, hugging terrain (up ramps, off ledges) rather than flying over it.
+ *  The Tank keeps its own identity — Leap goes OVER things, the Charge goes THROUGH them — and the
+ *  cooldown came down to match, since a grounded reposition is a far smaller commitment than a leap.
+ *  Still slams for damage and a (weaker, fatigue-tracked) stun when the charge ends — the Tank's
+ *  second, smaller CC source. The controller owns gravity, collision and the playfield clamp, so
+ *  this cast() only picks a direction. */
+// The dash's own speed multiplier and duration. `stats.speed` was tuned as a LAUNCH speed (a
+// value that only had to hold up for the airtime of an arc); a ground dash runs for a fixed
+// window, so it gets its own multiplier rather than silently reinterpreting that number.
+const CHARGE_DASH_SPEED_MULT = 2.6;
+const CHARGE_DASH_TIME = 0.42; // seconds of charge — long enough to cross a melee line, short enough to feel like a barge
+const shieldCharge: AbilityWithTree = {
   id: 'shieldCharge',
   name: 'Shield Charge',
   desc: 'Barrel forward behind your shield — no aiming, just charge — and flatten what you land on.',
   icon: '🐗',
   targeting: 'aimed',
-  cooldown: 11,
+  cooldown: 7, // shorter than the Warrior's Leap: a flat barge is a repositioning tool, not a leap
   role: 'mobility',
   ranks: [
     { cost: 0, stats: { speed: 5.5, damage: 20, radius: 3, stunDuration: 0.8 } },
@@ -182,15 +235,28 @@ const shieldCharge: AbilityDef = {
     { cost: 80, stats: { speed: 7.5, damage: 42 } },
     { cost: 140, stats: { speed: 8.5, damage: 58, radius: 3.6, stunDuration: 1.2 } },
   ],
+  tree: shieldChargeTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {
     const dirX = -Math.sin(caster.yaw);
     const dirZ = -Math.cos(caster.yaw);
 
-    actionState.leaping = true; // reuses the generic airborne viewmodel pose, same as Leap
+    actionState.leaping = true; // reuses the generic 'committed movement' viewmodel pose
     game.projectiles.impacts.push({ pos: caster.pos.clone(), kind: 'leap', aoe: false });
 
-    launchPlayer(dirX, dirZ, stats.speed, CHARGE_VSPEED, () => {
+    // Bulwark/Aegis Charge: safe to barge into danger — mitigation covers the whole flight.
+    if (stats.chargeReductionPct) {
+      applyDamageReduction(caster, game, 1 - stats.chargeReductionPct / 100, stats.chargeReductionDuration);
+    }
+    // Juggernaut/Rampage: damages everything the charge passes over, not just the landing.
+    if (stats.sweepRadius) startDamageSweep(caster, stats.sweepRadius, stats.sweepDamage);
+
+    // A flat charge, not a jump: dashPlayer holds a horizontal velocity for a fixed duration and
+    // leaves gravity/ground-clamping untouched, so the Tank barges along the ground (riding stair
+    // ramps, dropping off ledges) instead of arcing over things. launchPlayer can't express this —
+    // with no vertical impulse its landing check fires on the very next tick.
+    dashPlayer(dirX, dirZ, stats.speed * CHARGE_DASH_SPEED_MULT, CHARGE_DASH_TIME, () => {
       actionState.leaping = false;
+      if (stats.sweepRadius) stopDamageSweep(caster);
       for (const e of game.enemies) {
         if (!e.alive) continue;
         const dx = e.pos.x - caster.pos.x;

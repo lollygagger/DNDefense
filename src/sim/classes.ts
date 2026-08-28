@@ -2,9 +2,22 @@ import { Vector3 } from 'three';
 import { allocId, type AbilityDef, type PlayerClassDef, type PlayerState } from './types';
 import type { GameState } from './GameState';
 import { PLAYER_SPAWN } from '../data/castle';
+import { consumeShield, pulseThornsIfReady, tickAbilityEffects } from './abilityEffects';
+import { treeStats } from './abilityTree';
+export {
+  abilityTree,
+  buyAbilityTreeNode,
+  hasAbilityTree,
+  purchasedTreeNodes,
+  TREE_TIER_COST,
+  type AbilityTreeNode,
+} from './abilityTree';
 
 /** Owned by [player-classes]. Generic class framework: any PlayerClassDef plugs in here.
- *  Exported signatures are contract (UI uses them for the upgrade menu). */
+ *  Exported signatures are contract (UI uses them for the upgrade menu). Late-game "Mastery"
+ *  branching trees (sim/abilityTree.ts) and the generic combat side-effects they're built from
+ *  (sim/abilityEffects.ts) live in their own files to keep this one under the ~400-line
+ *  guideline — this file re-exports the tree API so every caller can import it from one place. */
 
 /** Generic, additive damage-mitigation buff — not tied to any one class mechanically, even
  *  though the Tank's Bulwark (src/data/tank.ts) is its only caller today. Stored off to the
@@ -56,7 +69,10 @@ export function createPlayer(classDef: PlayerClassDef): PlayerState {
     pitch: 0,
     takeDamage(amount: number, game: GameState) {
       if (!this.alive) return;
-      this.hp -= amount * damageMultiplier(this, game);
+      let dmg = amount * damageMultiplier(this, game);
+      dmg = consumeShield(this, game, dmg); // Tank's Aegis Overflow — absorbed before HP
+      this.hp -= dmg;
+      if (amount > 0) pulseThornsIfReady(this, game); // Tank's Retaliation — reacts to the hit itself
       game.events.emit('player:damaged', { hp: this.hp, maxHp: this.maxHp });
       if (this.hp <= 0) {
         this.hp = 0;
@@ -87,6 +103,9 @@ export function getAbilityStats(player: PlayerState, abilityId: string): Record<
   for (let i = 0; i <= rank && i < def.ranks.length; i++) {
     Object.assign(stats, def.ranks[i].stats);
   }
+  // Late-game Mastery tree (sim/abilityTree.ts) always applies on top of the linear ranks, not
+  // instead of them — a purchased node only needs to name the stats it actually changes.
+  Object.assign(stats, treeStats(player, def));
   return stats;
 }
 
@@ -147,6 +166,10 @@ export function initClasses(game: GameState): void {
           p.hp = Math.min(p.maxHp, p.hp + 5 * dt);
         }
       }
+      // Mastery-tree side-effects that need to act every tick rather than purely reactively
+      // (bleed DoT, lingering ground zones, the Tank's moving charge sweep) — see
+      // sim/abilityEffects.ts's tickAbilityEffects doc comment for why the rest don't need this.
+      if (game.phase === 'combat') tickAbilityEffects(dt, game);
     },
   });
 }

@@ -19,6 +19,7 @@ import { initFx } from './render/fx';
 import { initHud } from './ui/hud';
 import { initMenus } from './ui/menus';
 import { initScreens } from './ui/screens';
+import { initPlayground } from './ui/playground';
 
 /** FROZEN boot order. Sim modules first (castle before its consumers), then player,
  *  then render views, then UI. */
@@ -49,6 +50,7 @@ initFx(game);
 initHud(game);
 initMenus(game);
 initScreens(game);
+initPlayground(game);
 
 startLoop(game, () => R.renderer.render(R.scene, R.camera));
 

@@ -109,6 +109,18 @@ export const ARMORY = {
   upgrades: {
     veterans1: { cost: 70, bonusMax: 1, hpMult: 1.25 },
     veterans2: { cost: 120, damageMult: 1.5, hpMult: 1.25 }, // stacks on veterans1
+    // ---- High tier (late-game gold sink task, 2026-08-27): same 600g/1600g shape ability
+    // Mastery trees use (docs/GAME_DESIGN.md), not gated behind veterans1/2 for the same reason
+    // Mastery isn't gated behind an ability's maxed linear ranks — this is a second, independent
+    // branch point, not a continuation of the cheap one. Two mutually exclusive roots (see
+    // sim/structures/armory.ts): Bleeding Strikes (stacking DoT via sim/abilityEffects.ts's
+    // applyBleed — pure attrition on one tough target) vs Sundering Blows (a vulnerability mark
+    // via applyVulnerability — every swordsman becomes a spotter amplifying the WHOLE army's
+    // damage, not just its own). Purely behavioral: neither root touches hp/damage directly.
+    bleedingStrikes1: { cost: 600, bleedDpsPerStack: 10, bleedDuration: 3, bleedMaxStacks: 3 },
+    bleedingStrikes2: { cost: 1600, bleedDpsPerStack: 18, bleedDuration: 4, bleedMaxStacks: 4 }, // total, replaces tier 1
+    sunderingBlows1: { cost: 600, markVulnPct: 15, markVulnDuration: 3 },
+    sunderingBlows2: { cost: 1600, markVulnPct: 25, markVulnDuration: 4 }, // total, replaces tier 1
   },
 };
 
@@ -127,6 +139,20 @@ export const ARCHER_BARRACKS = {
     marksman2: { cost: 120, damageMult: 1.7, rangeBonus: 4 }, // total, replaces marksman1
     volley1: { cost: 70, bonusMax: 1, fireRateMult: 1.3 },
     volley2: { cost: 120, bonusMax: 2, fireRateMult: 1.6 }, // total, replaces volley1
+    // ---- High tier: a second, independent branch point (600g/1600g, not gated behind
+    // marksman2/volley2 — same "not gated behind the linear/cheap tier" precedent as ability
+    // Mastery), so the cheap axis (damage-per-archer vs roster size) and this axis (how the shot
+    // itself behaves) combine into real build diversity. Broadhead Arrows reuses the frozen
+    // ProjectileSpec's own `pierce` field (already plumbed for the crossbow's Ballista branch) —
+    // clears a lane of enemies standing in a line. Explosive Fletching reuses `aoeRadius` (already
+    // plumbed generically for ranged/caster allies via fireAt in sim/allyAI.ts, same field the ally
+    // mage's splash uses) — clears whatever's clustered at the wall instead. Mutually exclusive:
+    // pierce a line vs splash a cluster is the same shape of decision as the crossbow's own
+    // Ballista-vs-Cannon split.
+    broadheadArrows1: { cost: 600, pierce: 1 },
+    broadheadArrows2: { cost: 1600, pierce: 2 }, // total, replaces tier 1
+    explosiveFletching1: { cost: 600, aoeRadius: 2.0 },
+    explosiveFletching2: { cost: 1600, aoeRadius: 3.0 }, // total, replaces tier 1
   },
 };
 
@@ -146,6 +172,21 @@ export const MAGE_TOWER = {
     chill1: { cost: 90, slowPctBonus: 15, durationBonus: 1 },
     chill2: { cost: 150, slowPctBonus: 30, durationBonus: 2 }, // total, replaces chill1
     reinforcedSpire: { cost: 130, bonusMax: 1 },
+    // ---- High tier: independent of overload/chill/reinforcedSpire (same "not gated behind the
+    // cheap tier" precedent). Arcane Residue reuses sim/abilityEffects.ts's spawnGroundEffect
+    // (the exact helper the player Mage's own Volcanic Rupture/Killing Frost Mastery branches
+    // use) — the blast leaves a lingering scorched patch, converting a single burst into
+    // sustained area denial. Twin Casting is named after (and mechanically mirrors) the player
+    // Mage's own Fork Bolt -> Arcane Fusillade Mastery: instead of one heavy nuke, the tower
+    // fires an extra, weaker bolt at a second nearby target the instant it casts — trading some
+    // per-target damage for actually answering a spread group instead of committing everything
+    // to one target. Mutually exclusive: sustained damage over the blast site vs spreading the
+    // SAME cast across multiple targets are genuinely different answers to "there's more than
+    // one enemy here."
+    arcaneResidue1: { cost: 600, lingerDps: 16, lingerDuration: 3, lingerRadius: 2.5 },
+    arcaneResidue2: { cost: 1600, lingerDps: 28, lingerDuration: 4.5, lingerRadius: 3.2 }, // total, replaces tier 1
+    twinCasting1: { cost: 600, extraBoltCount: 1, extraBoltDamageMult: 0.5 },
+    twinCasting2: { cost: 1600, extraBoltCount: 2, extraBoltDamageMult: 0.65 }, // total, replaces tier 1
   },
 };
 
@@ -165,6 +206,19 @@ export const TANK_BARRACKS = {
     platedArmor2: { cost: 140, hpMult: 1.6, reductionPct: 0.2 }, // total, replaces platedArmor1
     aggressive1: { cost: 90, damageMult: 1.5, speedMult: 1.2 },
     aggressive2: { cost: 140, damageMult: 2.0, speedMult: 1.4 }, // total, replaces aggressive1
+    // ---- High tier: independent of platedArmor/aggressive. Retaliation Plating pulses damage to
+    // everything near the tank whenever IT is struck (a custom implementation, not
+    // sim/abilityEffects.ts's applyThorns/pulseThornsIfReady — that machinery is keyed to
+    // PlayerState and driven by a central per-tick loop over game.players only, neither of which
+    // an ally participates in; see sim/allies.ts's spawnAlly for the self-contained equivalent) —
+    // punishes being swarmed. Hardened Resolve instead heals the tank a flat amount on every
+    // LANDED hit — sustain through successfully landing blows on one tough target, the opposite
+    // scenario from Retaliation (which does nothing if nothing's in range to punish). Mutually
+    // exclusive: "I expect to be surrounded" vs "I expect to duel one big thing."
+    retaliationPlating1: { cost: 600, thornsDamage: 12, thornsRadius: 4 },
+    retaliationPlating2: { cost: 1600, thornsDamage: 22, thornsRadius: 5 }, // total, replaces tier 1
+    hardenedResolve1: { cost: 600, healOnHit: 5 },
+    hardenedResolve2: { cost: 1600, healOnHit: 10 }, // total, replaces tier 1
   },
 };
 
@@ -186,5 +240,33 @@ export const FIELD_HOSPITAL = {
     medic2: { cost: 160, healMult: 2.0, bonusMedics: 1 }, // total, replaces medic1's heal mult
     sapper1: { cost: 100, repairMult: 1.5 },
     sapper2: { cost: 160, repairMult: 2.2, bonusEngineers: 1 }, // total, replaces sapper1
+    // ---- High tier (600g/1600g, matching the ability-Mastery gold sink shape elsewhere): TWO
+    // independent capstones, NOT mutually exclusive with each other or with medic1/2/sapper1/2 —
+    // unlike the other four spawners' new tier, which are a single exclusive pair. This follows
+    // the Field Hospital's OWN pre-existing design principle straight from this file's doc
+    // comment above ("a purely-support building is meant to eventually do both jobs well, so the
+    // choice is which to fund first, not either/or") rather than importing the crossbow's
+    // either/or shape onto a building that was deliberately built not to have one.
+    //
+    // Guardian's Grace (medic side): a medic within range can save a defender from what would
+    // otherwise be a killing blow, once per medic on a long cooldown, leaving them standing at a
+    // fraction of max HP instead — see sim/allies.ts's tryMedicSave, called from spawnAlly's
+    // takeDamage. Deliberately does NOT resurrect an already-dead unit (see that function's doc
+    // comment for why: a dead ally is culled from game.allies, and its owning spawner frees the
+    // slot and starts a replacement, in the same tick it dies — reviving the same object afterward
+    // would silently let a roster exceed its cap). Scoped to allies only, not the player (the
+    // player already has its own 5s respawn-at-the-keep system elsewhere).
+    guardianGrace1: { cost: 600, reviveRange: 10, reviveHpFrac: 0.25, reviveCooldown: 20 },
+    guardianGrace2: { cost: 1600, reviveRange: 12, reviveHpFrac: 0.45, reviveCooldown: 14 }, // total, replaces tier 1
+    //
+    // Emergency Patching (engineer side): once per WAVE, if this wall's hp drops to/below a
+    // threshold during combat, an engineer instantly patches a flat chunk of its max hp back — a
+    // bounded, rare, discrete event, NOT routed through the steady per-tick repairBudget/
+    // ENGINEER_WALL_REPAIR_CAP accounting in sim/allyAI.ts's stepEngineer, so the "can't make a
+    // wall unbreakable under sustained pressure" guarantee stays exactly as true as it already
+    // was — this only ever fires once per wave per wall tier, it doesn't raise the sustained
+    // hp/sec ceiling at all.
+    emergencyPatch1: { cost: 600, emergencyThresholdPct: 20, emergencyPatchPct: 15 },
+    emergencyPatch2: { cost: 1600, emergencyThresholdPct: 30, emergencyPatchPct: 25 }, // total, replaces tier 1
   },
 };

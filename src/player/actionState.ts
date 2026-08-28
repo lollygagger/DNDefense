@@ -22,4 +22,19 @@ export const actionState = {
   grappleAnchor: null as Vector3 | null,
   /** True while a leap is airborne, so the viewmodel can hold a tucked/airborne pose. */
   leaping: false,
+
+  /** Ability id currently being hold-to-fire channelled (the Warlock's Soul Siphon), or null.
+   *  Generic on purpose — any future class's `channel`-flagged primary would drive the same
+   *  field. Written by player/casting.ts on press/release; `channelRamp01`/`channelEndPoint`
+   *  are then updated every successful tick by that ability's own sim-side cast() (the same
+   *  "write a presentation hint from cast()" precedent the Archer's grappleAnchor already is). */
+  channelId: null as string | null,
+  /** 0..1 ramp progress on whatever the channel is currently locked onto; 0 while not
+   *  channelling or while the beam isn't hitting anything. Drives the viewmodel's charge-up
+   *  glow and the Curse of Agony/Soul Siphon "Focused Curse" combo. */
+  channelRamp01: 0,
+  /** World-space point the channel beam actually reaches this tick (an enemy hit, a blocked-by-
+   *  cover point, or max range) — null while not channelling. Lets the viewmodel draw a beam
+   *  from the rig's muzzle to wherever the beam is really landing. */
+  channelEndPoint: null as Vector3 | null,
 };

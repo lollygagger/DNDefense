@@ -1,7 +1,15 @@
 import type { GameState } from '../sim/GameState';
 import type { AbilityDef } from '../sim/types';
-import { allAbilities } from '../sim/classes';
+import { allAbilities, hasAbilityTree, purchasedTreeNodes } from '../sim/classes';
 import { WAVE_CLEAR_BONUS } from '../data/waves';
+import { isEmpowered, isThornsActive, shieldAmountRemaining } from '../sim/abilityEffects';
+import { isSlowed } from '../sim/status';
+
+/** Beyond this many linear ranks, the ability-bar pip strip (58px wide) switches from
+ *  one-dot-per-rank to a compact "current/max" number — late-game Mastery trees (sim/
+ *  abilityTree.ts) can also add a couple of small "mastery" pips alongside the rank pips, so
+ *  this keeps the whole strip readable regardless of how deep any one ability's kit ever gets. */
+const PIP_DOT_LIMIT = 5;
 
 /** Owned by [ui]. HUD: top bar (gold / wave / phase), build banner, player HP bar,
  *  damage vignette, death overlay, ability bar with cooldown sweeps, toasts, wave banners.
@@ -56,6 +64,7 @@ interface AbilitySlot {
   cdText: HTMLElement;
   pips: HTMLElement;
   lastRank: number;
+  lastTreeCount: number; // -1 = never rendered yet, forces the first pip build
 }
 
 export function initHud(game: GameState): void {
@@ -74,6 +83,7 @@ export function initHud(game: GameState): void {
        <div id="hp-wrap">
          <div class="hp-label">❤️ <span id="hp-num"></span></div>
          <div class="bar hp-bar"><div class="bar-fill" id="hp-fill"></div></div>
+         <div id="status-row"></div>
        </div>
        <div id="ability-bar"></div>
        <div id="toasts"></div>
@@ -95,6 +105,7 @@ export function initHud(game: GameState): void {
   const buildBanner = document.getElementById('build-banner')!;
   const hpNum = document.getElementById('hp-num')!;
   const hpFill = document.getElementById('hp-fill')!;
+  const statusRow = document.getElementById('status-row')!;
   const abilityBar = document.getElementById('ability-bar')!;
   const toasts = document.getElementById('toasts')!;
   const waveBanner = document.getElementById('wave-banner')!;
@@ -125,6 +136,7 @@ export function initHud(game: GameState): void {
         cdText: el.querySelector<HTMLElement>('.slot-cd-text')!,
         pips: el.querySelector<HTMLElement>('.slot-pips')!,
         lastRank: -1,
+        lastTreeCount: -1,
       };
     });
   }
@@ -186,6 +198,25 @@ export function initHud(game: GameState): void {
       hpFill.classList.toggle('low', pct <= 30);
       hpNum.textContent = `${Math.ceil(p.hp)} / ${p.maxHp}`;
 
+      // Optional/secondary (ability-clarity task, 2026-08-27): the player's own buffs/debuffs
+      // had the same invisibility problem enemy statuses did — surfaced here via the same
+      // read-only queries render/enemyView.ts uses for enemies (sim/abilityEffects.ts,
+      // sim/status.ts). Bulwark's %damage-reduction isn't included: it's tracked in
+      // sim/classes.ts, which this task doesn't own (see the report for the exact wording
+      // proposed for docs/GAME_DESIGN.md's follow-up note).
+      let statusHtml = '';
+      const shieldHp = shieldAmountRemaining(p, game);
+      if (shieldHp > 0) statusHtml += `<span class="status-chip shield">🛡️ ${Math.ceil(shieldHp)}</span>`;
+      if (isEmpowered(p, game)) statusHtml += `<span class="status-chip empower">⚡ Empowered</span>`;
+      if (isThornsActive(p, game)) statusHtml += `<span class="status-chip thorns">🌵 Thorns</span>`;
+      if (isSlowed(p, game)) statusHtml += `<span class="status-chip slowed">❄️ Slowed</span>`;
+      if (statusHtml) {
+        statusRow.innerHTML = statusHtml;
+        statusRow.style.display = '';
+      } else {
+        statusRow.style.display = 'none';
+      }
+
       // Death overlay
       if (!p.alive && p.respawnAt !== null) {
         deathOverlay.style.display = '';
@@ -206,13 +237,22 @@ export function initHud(game: GameState): void {
         slot.root.classList.toggle('ready', remaining <= 0 && p.alive);
 
         const rank = p.abilityRanks[slot.def.id] ?? 0;
-        if (rank !== slot.lastRank) {
+        const treeCount = hasAbilityTree(slot.def) ? purchasedTreeNodes(p, slot.def.id).length : 0;
+        if (rank !== slot.lastRank || treeCount !== slot.lastTreeCount) {
           slot.lastRank = rank;
+          slot.lastTreeCount = treeCount;
           const maxRank = slot.def.ranks.length - 1;
           let pipHtml = '';
-          for (let r = 1; r <= maxRank; r++) {
-            pipHtml += `<span class="pip${r <= rank ? ' on' : ''}"></span>`;
+          if (maxRank > PIP_DOT_LIMIT) {
+            // Too many linear ranks to read as individual dots in 58px — a compact number instead.
+            pipHtml += `<span class="pip-count">${rank}/${maxRank}</span>`;
+          } else {
+            for (let r = 1; r <= maxRank; r++) pipHtml += `<span class="pip${r <= rank ? ' on' : ''}"></span>`;
           }
+          // Mastery-tree progress (at most 2 nodes per ability today — a tier-1 pick plus its
+          // capstone) gets its own smaller, distinctly-colored pips rather than one dot per
+          // rank, so a maxed-out linear kit and a maxed-out Mastery branch never look identical.
+          for (let m = 0; m < treeCount; m++) pipHtml += `<span class="pip mastery on"></span>`;
           slot.pips.innerHTML = pipHtml;
         }
       }

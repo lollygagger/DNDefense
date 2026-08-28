@@ -1,4 +1,5 @@
 import type { StructureDef, UpgradeNode, WallTier } from '../sim/types';
+import type { AbilityTreeNode } from '../sim/abilityTree';
 import { escapeHtml } from './hud';
 
 /** Owned by [ui]. Shared, stateless rendering widgets used by every menu in ui/menus.ts and
@@ -99,10 +100,35 @@ export function upgradeNodeHtml(
   </div>`;
 }
 
+/** The Tab class menu's "Mastery" section for one ability — reuses branchColumns/upgradeNodeHtml
+ *  exactly like the socket menu does for a structure's upgrades and the castle menu does for a
+ *  wall's Fortify tree, so the visual language matches across every upgrade-tree screen in the
+ *  game. Returns '' (nothing rendered) for abilities with no tree, so callers can splice this in
+ *  unconditionally. `action` should already have the ability id encoded in it (e.g.
+ *  `buyTree:${abilityId}`) since a bare node id isn't unique across abilities the way it is
+ *  within one structure's own upgrade list. */
+export function abilityTreeHtml(tree: AbilityTreeNode[], purchasedIds: string[], action: string, gold: number): string {
+  if (tree.length === 0) return '';
+  const owner: UpgradeTreeOwner = { upgrades: tree };
+  const holder: UpgradeTreeHolder = { purchased: purchasedIds };
+  const cols = branchColumns(owner)
+    .map(
+      (col) => `<div class="upgrade-col">${col.map((n) => upgradeNodeHtml(owner, holder, n, action, gold)).join('')}</div>`
+    )
+    .join('');
+  return `<div class="menu-subheading">Mastery</div><div class="upgrade-cols">${cols}</div>`;
+}
+
 export function structureIcon(def: StructureDef): string {
   return def.socketKind === 'embrasure' ? '🏹' : '🛡️';
 }
 
+// Late-game ability Mastery trees (sim/abilityTree.ts) introduce a lot of new per-branch stat
+// keys — kept out of the ability's own row-desc.stats line where they're not covered here, this
+// map just makes the common/shared ones read as words instead of raw camelCase. A key missing
+// from this map still renders (falls back to the bare key, see fmtStats below); the tree node's
+// own prose `desc` (see data/<class>Tree.ts) is the primary way a player learns what a branch
+// does, this line is a secondary "what am I currently getting" summary.
 const STAT_LABELS: Record<string, string> = {
   damage: 'Damage',
   speed: 'Speed',
@@ -117,15 +143,61 @@ const STAT_LABELS: Record<string, string> = {
   stunRadius: 'Stun radius',
   reductionPct: 'Damage taken',
   autoFire: 'Full auto',
+  count: 'Bolts',
+  spreadDeg: 'Spread',
+  stormCount: 'Fragments',
+  stormDamage: 'Fragment dmg',
+  stormRadius: 'Fragment radius',
+  burnDps: 'Burn',
+  frostDps: 'Frost burn',
+  lingerSlowPct: 'Lingering slow',
+  charges: 'Charges',
+  reboundDamage: 'Rebound dmg',
+  bleedDps: 'Bleed',
+  killRefund: 'CD refund/kill',
+  outerRadius: 'Outer radius',
+  outerDamage: 'Outer dmg',
+  vulnPct: 'Vulnerability',
+  dmgBuffPct: 'Damage buff',
+  knockback: 'Knockback',
+  cooldownMult: 'Cooldown mult',
+  aoeRadius: 'Splash radius',
+  fireRateMult: 'Fire rate mult',
+  chainJumps: 'Chain jumps',
+  chainRadius: 'Chain radius',
+  explodeRadius: 'Blast radius',
+  explodeDamage: 'Blast dmg',
+  markPct: 'Mark',
+  crippleStackPct: 'Shred/stack',
+  webRadius: 'Web radius',
+  webSlowPct: 'Web slow',
+  pullSpeedMult: 'Pull speed mult',
+  pitonRadius: 'Piton radius',
+  pitonDamage: 'Piton dmg',
+  pitonPull: 'Piton pull',
+  reductionPerHitPct: 'Reduction/hit',
+  healPerHit: 'Heal/hit',
+  stunPerTarget: 'Stun/target',
+  stunCap: 'Stun cap',
+  focusBonusDamage: 'Focus dmg',
+  focusStunBonus: 'Focus stun',
+  shieldAmount: 'Shield',
+  thornsDamage: 'Thorns dmg',
+  thornsRadius: 'Thorns radius',
+  chargeReductionPct: 'Charge reduction',
+  sweepRadius: 'Sweep radius',
+  sweepDamage: 'Sweep dmg',
 };
 
 function fmtStatVal(key: string, v: number): string {
-  if (key === 'slowPct' || key === 'stunPct') return `${v}%`;
-  if (key === 'duration' || key === 'stunDuration') return `${v}s`;
-  if (key === 'arcDeg') return `${v}°`;
   // A damage-reduction buff reads as a reduction, so show it signed rather than as a bare
   // number the player has to guess the direction of.
-  if (key === 'reductionPct') return `-${v}%`;
+  if (key === 'reductionPct' || key === 'chargeReductionPct') return `-${v}%`;
+  // Generic suffix rules cover every Mastery-tree percent/duration stat above without needing
+  // a per-key entry here too — only truly special formats (°, ✓) still need an exact match.
+  if (key.endsWith('Pct')) return `${v}%`;
+  if (key === 'duration' || key.endsWith('Duration')) return `${v}s`;
+  if (key === 'arcDeg' || key === 'spreadDeg') return `${v}°`;
   // Flag-style stats (a rank that unlocks a behaviour rather than a value) read as a check,
   // not as "1".
   if (key === 'autoFire') return v ? '✓' : '—';

@@ -26,7 +26,7 @@ Files marked **FROZEN** are the shared contracts — do not modify them; if a co
 
 ```
 index.html                  FROZEN   canvas + #ui root
-src/main.ts                 FROZEN   boot order, module wiring
+src/main.ts                 FROZEN   boot order, module wiring (one addition: initPlayground, last)
 src/core/loop.ts            FROZEN   fixed-tick accumulator (60 Hz), render on rAF
 src/core/events.ts          FROZEN   typed EventBus + event map
 src/core/rng.ts             FROZEN   seeded RNG
@@ -63,6 +63,7 @@ src/ui/hud.ts               [ui]                HP/gold/wave/ability bar, crossh
 src/ui/menus.ts             [ui]                socket build menu, wall repair, Tab class upgrades
 src/ui/screens.ts           [ui]                start screen (class select), game over
 src/ui/style.css            [ui]                all UI styling
+src/ui/playground.ts        [ui]                sandbox/testing mode (opt-in, see below)
 ```
 
 Every module exposes `init<Name>(game: Game): void` and registers systems via `game.addSystem({ tick?, render? })`. `main.ts` calls the inits in dependency order. Stub implementations exist for every module so the app always compiles; agents replace stub internals but keep the exported signatures.
@@ -136,3 +137,22 @@ spacing choice that breaks the "12 divides evenly" alignment.
 - Game phases: `menu → build ⇄ combat → gameover`. Phase changes only via `GameState.setPhase()`.
 - Keep files under ~400 lines; split rather than grow.
 - `npm run check` (tsc --noEmit) must pass before you finish any task.
+
+
+## Playground mode (`src/ui/playground.ts`)
+
+An opt-in sandbox for testing, enabled from a checkbox on the start screen or by adding
+`?playground` to the URL. It keeps gold topped up, lets the wave counter be set directly
+(so late waves can be reached without playing 25 rounds), buys out a class's whole kit
+including mastery trees in one click, and offers god mode plus a clear-the-field button.
+
+Two notes for anyone editing it:
+- The `?playground` flag is parsed at **module load**, not inside `initPlayground()`. `main.ts`'s
+  boot order runs `initScreens()` first, and the start screen reads the flag to pre-tick its
+  checkbox — parsing at import time is what keeps the URL and the checkbox in agreement.
+- It is the one addition to the FROZEN `main.ts` boot order, appended last so it can never
+  affect the initialization of anything else. It registers a normal system like every other
+  module and touches no sim internals beyond public `GameState` APIs.
+
+It deliberately looks like a dev tool (cool cyan against the game's warm gold, a persistent
+corner badge) because it invalidates the economy and difficulty everything else is tuned around.

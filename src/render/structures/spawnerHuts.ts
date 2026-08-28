@@ -33,6 +33,21 @@ const steelMat = new THREE.MeshLambertMaterial({ color: 0x5a6470, flatShading: t
 const arcaneOrbMat = new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.85 });
 const crossMat = new THREE.MeshLambertMaterial({ color: 0xd94f4f, flatShading: true });
 
+// ---- High-tier "elite" glow (late-game spawner-upgrades task, 2026-08-27) — a small hovering,
+// rotating crystal that only appears once a structure owns a 600g/1600g high-tier node (see
+// hasHighTier()/updateHutRec() in structureView.ts), one distinct color per building so it also
+// hints at WHICH high tier without needing to open the menu: blood-red for the Armory's bleed/
+// mark branches, verdant for the Archer Barracks' pierce/splash arrows, icy-white for the Mage
+// Tower's residue/twin-cast (distinct from its permanent blue finial orb, which is unrelated to
+// upgrades), molten orange for the Tank Barracks' retaliation/sustain, and warm gold-white for
+// the Field Hospital's guardian/triage capstones.
+const eliteCrystalGeo = new THREE.OctahedronGeometry(0.16, 0);
+const eliteArmoryMat = new THREE.MeshBasicMaterial({ color: 0xff2f3f, transparent: true, opacity: 0.9 });
+const eliteArcherMat = new THREE.MeshBasicMaterial({ color: 0x7dffb0, transparent: true, opacity: 0.9 });
+const eliteMageMat = new THREE.MeshBasicMaterial({ color: 0xf0fbff, transparent: true, opacity: 0.9 });
+const eliteTankMat = new THREE.MeshBasicMaterial({ color: 0xff8a2a, transparent: true, opacity: 0.9 });
+const eliteHospitalMat = new THREE.MeshBasicMaterial({ color: 0xffe8a0, transparent: true, opacity: 0.9 });
+
 const hutBaseGeo = new THREE.BoxGeometry(2.2, 1.3, 1.8);
 const hutRoofGeo = new THREE.ConeGeometry(1.7, 0.9, 4);
 const bannerGeo = new THREE.PlaneGeometry(0.5, 0.9);
@@ -92,8 +107,13 @@ export function buildArmoryRec(): Rec {
   trim.visible = false;
   group.add(trim);
 
+  const elite = new THREE.Mesh(eliteCrystalGeo, eliteArmoryMat);
+  elite.position.set(0, 1.75 + 0.45, 0);
+  elite.visible = false;
+  group.add(elite);
+
   R.scene.add(group);
-  return { defId: ARMORY_DEF_ID, group, trimMesh: trim };
+  return { defId: ARMORY_DEF_ID, group, trimMesh: trim, eliteMesh: elite };
 }
 
 /** Same hut base as the Armory but a green-trimmed roof and a crossed-bow rack instead of
@@ -128,8 +148,13 @@ export function buildArcherBarracksRec(): Rec {
   trim.visible = false;
   group.add(trim);
 
+  const elite = new THREE.Mesh(eliteCrystalGeo, eliteArcherMat);
+  elite.position.set(0, 1.75 + 0.45, 0);
+  elite.visible = false;
+  group.add(elite);
+
   R.scene.add(group);
-  return { defId: ARCHER_BARRACKS_DEF_ID, group, trimMesh: trim };
+  return { defId: ARCHER_BARRACKS_DEF_ID, group, trimMesh: trim, eliteMesh: elite };
 }
 
 /** A tall stone tower + conical roof + glowing finial orb — deliberately the tallest, most
@@ -159,8 +184,16 @@ export function buildMageTowerRec(): Rec {
   trim.visible = false;
   group.add(trim);
 
+  // A separate small crystal below the permanent finial orb — the orb itself always pulses
+  // (it's the tower's base identity, unrelated to upgrades), so the high-tier tell needs its own
+  // mesh rather than repurposing the orb's visibility.
+  const elite = new THREE.Mesh(eliteCrystalGeo, eliteMageMat);
+  elite.position.set(0, 2.0 + 0.75, 0);
+  elite.visible = false;
+  group.add(elite);
+
   R.scene.add(group);
-  return { defId: MAGE_TOWER_DEF_ID, group, trimMesh: trim, orbMesh: orb };
+  return { defId: MAGE_TOWER_DEF_ID, group, trimMesh: trim, orbMesh: orb, eliteMesh: elite };
 }
 
 /** Wider, lower, flat-roofed and corner-spiked — reads as fortified/bulky, matching the tanks
@@ -196,8 +229,13 @@ export function buildTankBarracksRec(): Rec {
   trim.visible = false;
   group.add(trim);
 
+  const elite = new THREE.Mesh(eliteCrystalGeo, eliteTankMat);
+  elite.position.set(0, 1.85, 0);
+  elite.visible = false;
+  group.add(elite);
+
   R.scene.add(group);
-  return { defId: TANK_BARRACKS_DEF_ID, group, trimMesh: trim };
+  return { defId: TANK_BARRACKS_DEF_ID, group, trimMesh: trim, eliteMesh: elite };
 }
 
 /** The hut base with a peaked tent-style roof and a red cross banner — the one spawner building
@@ -230,6 +268,11 @@ export function buildFieldHospitalRec(): Rec {
   trim.visible = false;
   group.add(trim);
 
+  const elite = new THREE.Mesh(eliteCrystalGeo, eliteHospitalMat);
+  elite.position.set(0, 1.75 + 0.35, 0);
+  elite.visible = false;
+  group.add(elite);
+
   R.scene.add(group);
-  return { defId: FIELD_HOSPITAL_DEF_ID, group, trimMesh: trim };
+  return { defId: FIELD_HOSPITAL_DEF_ID, group, trimMesh: trim, eliteMesh: elite };
 }

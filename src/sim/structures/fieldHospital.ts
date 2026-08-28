@@ -29,13 +29,39 @@ function medicOverrides(base: AllyDef, purchased: string[]): Partial<AllyDef> {
   const m1 = purchased.includes('medic1');
   const healMult = m2 ? FIELD_HOSPITAL.upgrades.medic2.healMult : m1 ? FIELD_HOSPITAL.upgrades.medic1.healMult : 1;
   const rangeMult = m1 ? FIELD_HOSPITAL.upgrades.medic1.rangeMult : 1;
-  return { healAmount: (base.healAmount ?? 0) * healMult, healRange: (base.healRange ?? 0) * rangeMult };
+
+  // Guardian's Grace/Miraculous Grace — independent capstone, not exclusive with medic1/2 or
+  // with the engineer-side Emergency Patching below (see FIELD_HOSPITAL.upgrades' doc comment
+  // in data/structures.ts for why this one building keeps its new tier non-exclusive). Resolved
+  // in sim/allyTierEffects.ts's tryMedicSave, called from spawnAlly's takeDamage.
+  const g2 = purchased.includes('guardianGrace2');
+  const g1 = purchased.includes('guardianGrace1');
+  const grace = g2 ? FIELD_HOSPITAL.upgrades.guardianGrace2 : g1 ? FIELD_HOSPITAL.upgrades.guardianGrace1 : null;
+
+  return {
+    healAmount: (base.healAmount ?? 0) * healMult,
+    healRange: (base.healRange ?? 0) * rangeMult,
+    reviveRange: grace?.reviveRange,
+    reviveHpFrac: grace?.reviveHpFrac,
+    reviveCooldown: grace?.reviveCooldown,
+  };
 }
 function engineerOverrides(base: AllyDef, purchased: string[]): Partial<AllyDef> {
   const s2 = purchased.includes('sapper2');
   const s1 = purchased.includes('sapper1');
   const repairMult = s2 ? FIELD_HOSPITAL.upgrades.sapper2.repairMult : s1 ? FIELD_HOSPITAL.upgrades.sapper1.repairMult : 1;
-  return { repairRate: (base.repairRate ?? 0) * repairMult };
+
+  // Emergency Patching/Triage Protocols — independent capstone, see the doc comment above and
+  // sim/allyTierEffects.ts's applyEmergencyPatch (called from sim/allyAI.ts's stepEngineer).
+  const e2 = purchased.includes('emergencyPatch2');
+  const e1 = purchased.includes('emergencyPatch1');
+  const patch = e2 ? FIELD_HOSPITAL.upgrades.emergencyPatch2 : e1 ? FIELD_HOSPITAL.upgrades.emergencyPatch1 : null;
+
+  return {
+    repairRate: (base.repairRate ?? 0) * repairMult,
+    emergencyThresholdPct: patch?.emergencyThresholdPct,
+    emergencyPatchPct: patch?.emergencyPatchPct,
+  };
 }
 
 /** One half of the dual roster (all the medic or all the engineer bookkeeping). Kept as a
@@ -163,6 +189,40 @@ export const fieldHospitalDef: StructureDef = {
       desc: '+120% wall repair rate (total), +1 engineer.',
       cost: FIELD_HOSPITAL.upgrades.sapper2.cost,
       requires: 'sapper1',
+    },
+    // ---- High tier (600g/1600g): TWO independent capstones, NOT mutually exclusive with each
+    // other or with medic1/2/sapper1/2 — unlike the other four spawners' new tier, which is a
+    // single exclusive pair. This follows the Field Hospital's own pre-existing design principle
+    // (see this structure's doc comment above and FIELD_HOSPITAL's in data/structures.ts): a
+    // purely-support building is meant to eventually do both jobs well, so the choice stays
+    // "which to fund first," not either/or.
+    {
+      id: 'guardianGrace1',
+      name: "Guardian's Grace",
+      desc: 'A medic within 10 units can now save a defender from a killing blow — once every 20s per medic — leaving them at 25% HP instead of dead.',
+      cost: FIELD_HOSPITAL.upgrades.guardianGrace1.cost,
+      requires: null,
+    },
+    {
+      id: 'guardianGrace2',
+      name: 'Miraculous Grace',
+      desc: 'Range 12, 45% HP save, 14s cooldown per medic — your medics start pulling soldiers back from the brink routinely, not just once in a while.',
+      cost: FIELD_HOSPITAL.upgrades.guardianGrace2.cost,
+      requires: 'guardianGrace1',
+    },
+    {
+      id: 'emergencyPatch1',
+      name: 'Emergency Patching',
+      desc: 'Once per wave, if this wall drops to 20% HP or lower, an engineer instantly patches 15% of its max HP back — a one-time safety net on top of the steady repair trickle.',
+      cost: FIELD_HOSPITAL.upgrades.emergencyPatch1.cost,
+      requires: null,
+    },
+    {
+      id: 'emergencyPatch2',
+      name: 'Triage Protocols',
+      desc: 'Triggers at 30% HP or lower, restores 25% (total) — engineers catch the wall before it’s really in danger, not just before it falls.',
+      cost: FIELD_HOSPITAL.upgrades.emergencyPatch2.cost,
+      requires: 'emergencyPatch1',
     },
   ] satisfies UpgradeNode[],
   create(socket: Socket, game: GameState): StructureInstance {

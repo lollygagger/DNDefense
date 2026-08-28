@@ -1,18 +1,19 @@
 import type { GameState } from '../sim/GameState';
 import type { Socket, WallTier } from '../sim/types';
 import { getStructureDef, getStructureDefsForSocket } from '../sim/structures';
-import { allAbilities, buyAbilityRank, getAbilityStats, nextRankCost } from '../sim/classes';
 import { WALL_UPGRADE_TREE } from '../sim/wallUpgrades';
 import { anyOverlayOpen, escapeHtml, overlayClosed, overlayOpened } from './hud';
 import { renderCastleMenu as renderCastleMenuHtml } from './castleMenu';
-import { branchColumns, costBtn, fmtStats, nodeState, panel, structureIcon, upgradeNodeHtml, WALL_NAMES } from './menuWidgets';
+import { handleClassMenuAction, renderClassMenu as renderClassMenuHtml } from './classMenu';
+import { branchColumns, costBtn, nodeState, panel, structureIcon, upgradeNodeHtml, WALL_NAMES } from './menuWidgets';
 
 /** Owned by [ui]. The three in-game menus (mutually exclusive):
  *  E = socket build/upgrade, B = castle walls, Tab = class upgrades. Esc closes.
  *  Reads sim state + calls sim APIs only — never mutates state directly. Shared rendering
  *  widgets (panel chrome, upgrade-tree columns, stat formatting) live in ui/menuWidgets.ts; the
- *  castle menu's own wall-upgrade-tree rendering lives in ui/castleMenu.ts — both split out to
- *  keep this file under the ~400-line guideline once the wall upgrade tree landed. */
+ *  castle menu's own wall-upgrade-tree rendering lives in ui/castleMenu.ts, and the Tab class
+ *  menu's (linear ranks + late-game Mastery trees) lives in ui/classMenu.ts — all three split out
+ *  to keep this file under the ~400-line guideline. */
 
 /** Non-frozen wall-upgrade extension of CastleApi, read via a narrow local interface + cast —
  *  the same pattern sim/projectiles.ts uses for blocksProjectile (see docs/ARCHITECTURE.md).
@@ -80,12 +81,21 @@ export function initMenus(game: GameState): void {
     let html: string | null;
     if (open === 'socket') html = renderSocketMenu();
     else if (open === 'castle') html = renderCastleMenu();
-    else html = renderClassMenu();
+    else html = renderClassMenuHtml(game);
     if (html === null) {
       close();
       return;
     }
+    // Preserve the body's scroll offset across the throttled live re-render. This rebuilds the
+    // whole subtree every MENU_REFRESH_S to refresh HP bars and affordability, which destroys the
+    // scrolled element — without this, scrolling a tall menu (the castle Fortify screen) snaps
+    // straight back to the top a quarter-second later and the panel is effectively unusable.
+    const prevScroll = root.querySelector<HTMLElement>('.menu-body')?.scrollTop ?? 0;
     root.innerHTML = html;
+    if (prevScroll > 0) {
+      const body = root.querySelector<HTMLElement>('.menu-body');
+      if (body) body.scrollTop = prevScroll; // clamps itself if the content got shorter
+    }
   }
 
   // ---------- socket menu ----------
@@ -141,47 +151,9 @@ export function initMenus(game: GameState): void {
     return result.html;
   }
 
-  // ---------- class menu ----------
-
-  function renderClassMenu(): string | null {
-    const p = game.localPlayer;
-    if (!p) return null;
-    const abilities = allAbilities(p.classDef);
-    const rows = abilities
-      .map((a, i) => {
-        const hotkey = i === 0 ? 'LMB' : String(i + 1);
-        const rank = p.abilityRanks[a.id] ?? 0;
-        const maxRank = a.ranks.length - 1;
-        let pips = '';
-        for (let r = 1; r <= maxRank; r++) pips += `<span class="pip${r <= rank ? ' on' : ''}"></span>`;
-        const stats = fmtStats(getAbilityStats(p, a.id));
-        const cost = nextRankCost(p, a.id);
-        let action: string;
-        if (cost === null) {
-          action = `<div class="node-badge owned">MAX</div>`;
-        } else {
-          const nextStats = fmtStats(a.ranks[rank + 1]?.stats ?? {});
-          action = `<div class="row-action">
-            ${costBtn('buy-rank', a.id, 'Upgrade', cost, game.gold)}
-            <div class="row-desc next-stats">Next: ${nextStats}</div>
-          </div>`;
-        }
-        return `<div class="menu-row">
-          <div class="row-main">
-            <div class="row-name">${a.icon} ${escapeHtml(a.name)}
-              <span class="row-sub">[${hotkey}] · ${a.cooldown}s cd</span>
-              <span class="slot-pips inline">${pips}</span>
-            </div>
-            <div class="row-desc">${escapeHtml(a.desc)}</div>
-            <div class="row-desc stats">${stats}</div>
-          </div>
-          ${action}
-        </div>`;
-      })
-      .join('');
-    const header = `<div class="row-desc">${escapeHtml(p.classDef.desc)}</div>`;
-    return panel(`🧙 ${escapeHtml(p.classDef.name)} — Abilities`, header + rows);
-  }
+  // Tab class menu rendering (linear ranks + late-game Mastery trees) lives entirely in
+  // ui/classMenu.ts — renderClassMenuHtml above, handleClassMenuAction in the click handler
+  // below — exactly like the castle menu's split.
 
   // ---------- actions (delegated clicks) ----------
 
@@ -201,6 +173,13 @@ export function initMenus(game: GameState): void {
 
     if (action === 'close') {
       close();
+      return;
+    }
+    // Tab class menu's own actions (buy-rank, and the dynamic buyTree:<abilityId> Mastery-node
+    // purchases) — delegated to ui/classMenu.ts, which emits its own toasts since it doesn't
+    // share this function's trySpendAction helper.
+    if (handleClassMenuAction(game, action, arg)) {
+      renderMenu();
       return;
     }
     const socket = socketId ? game.castle.getSocketById(socketId) : null;
@@ -269,19 +248,6 @@ export function initMenus(game: GameState): void {
           () => (game.castle as unknown as WallUpgradable).upgradeWall(tier, arg),
           `${node.name} built! 🏗️`,
           `Upgrade unavailable.`
-        );
-        break;
-      }
-      case 'buy-rank': {
-        const p = game.localPlayer;
-        if (!p) break;
-        const cost = nextRankCost(p, arg);
-        if (cost === null) break;
-        trySpendAction(
-          cost,
-          () => buyAbilityRank(game, p, arg),
-          `Ability improved! ⬆️`,
-          `Cannot upgrade.`
         );
         break;
       }

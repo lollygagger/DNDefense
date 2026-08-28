@@ -3,13 +3,41 @@ import type { GameState } from '../sim/GameState';
 import type { SimEnemy } from '../sim/enemies';
 import { ENEMY_DEFS, isFlyerDef } from '../data/enemies';
 import { R } from './scene';
-import { spawnBurst } from './fx';
+import { spawnBurst, spawnRing } from './fx';
+import { isStunned, slowSeverity } from '../sim/status';
+import { isBleeding, isBurning, isVulnerable } from '../sim/abilityEffects';
+import { ROOT_SEVERITY_THRESHOLD, STATUS_COLOR, statusIconTexture, type StatusIconKind } from './statusIcons';
 
 /** Owned by [enemies-waves]. Charming low-poly enemies: pooled THREE.Groups (a handful of
  *  boxes/cones each — alive counts stay well under ~80), walk-bob, facing, billboarded
  *  health bars, death bursts. Flyers (hot air balloon, dragon) additionally get a pooled ground
  *  shadow decal — the altitude cue a player needs to judge height, since nothing else in this
- *  low-poly style implies depth/height on its own. Reads sim state only, never mutates it. */
+ *  low-poly style implies depth/height on its own. Also draws up to 2 billboarded status icons
+ *  per enemy (stun/root/slow/mark/bleed/burn — see the STATUS ICONS section below) and a one-
+ *  shot flash the instant a stun actually lands. Reads sim state only, never mutates it. */
+
+// ---------- STATUS ICONS (ability-clarity task, 2026-08-27) ----------
+// The blocker this task had to solve first: bleed/vulnerability/shield/thorns lived in
+// module-private WeakMaps inside sim/abilityEffects.ts, invisible to render. That file (and
+// sim/status.ts, for stun/slow) now exports small read-only query functions — isStunned,
+// slowSeverity, isBleeding, isVulnerable, isBurning — every one a primitive-returning read of
+// data that was already being tracked for gameplay, none of them able to change what an effect
+// does or how long it lasts. This section just calls them.
+//
+// Icon budget: at most 2 icons per enemy, chosen in a fixed priority order (the status most
+// likely to change what the player does next wins a slot first):
+//   1. stun  — hard CC, the single most decision-relevant thing that can happen to an enemy.
+//   2. root/slow — the same Unit.slowFactor mechanic at two readable tiers (see statusIcons.ts's
+//      ROOT_SEVERITY_THRESHOLD): a heavy snare changes positioning decisions more than a mild one.
+//   3. mark — vulnerable/marked (bonus damage taken): tells the player which target to focus.
+//   4. bleed — a running damage tally; informative, rarely urgent.
+//   5. burn  — standing in a damage zone; the ground effect itself (render/fx.ts) already
+//      telegraphs this on the terrain, so the per-enemy icon is the lowest priority of the six.
+// Two per enemy, not more, keeps a screen full of enemies readable instead of turning into icon
+// soup — the icons are billboarded sprites tied 1:1 to each enemy's own pooled Rec (exactly like
+// its health-bar sprites), so the worst case across the whole game is bounded by the same ~80
+// concurrent enemy cap the health bars already live within: 160 icon sprites, the same order of
+// magnitude as the 160 health-bar sprites already shipping today.
 
 const PALETTE: Record<string, { body: number; skin: number; accent: number; burst: number }> = {
   goblin: { body: 0x4f9440, skin: 0x6cb84f, accent: 0x2f5e28, burst: 0x6cd14e },
@@ -45,7 +73,19 @@ interface Rec {
   shadow: THREE.Mesh | null;
   shadowMat: THREE.MeshBasicMaterial | null;
   shadowBaseR: number;
+  // Status icons: up to 2 small billboarded glyphs shown above the enemy, independent of the
+  // health bar's own full-HP hiding (a full-HP enemy can still be stunned/slowed). wasStunned
+  // is render-side bookkeeping only (not sim state) so the one-shot "stun just landed" flash
+  // fires exactly once per stun, not every frame the icon happens to be visible.
+  icon1: THREE.Sprite;
+  icon1Mat: THREE.SpriteMaterial;
+  icon2: THREE.Sprite;
+  icon2Mat: THREE.SpriteMaterial;
+  wasStunned: boolean;
 }
+
+const ICON_SIZE = 0.34;
+const ICON_SPACING = 0.4;
 
 // Shared, allocation-free once built: every flyer's shadow decal reuses this one flat-disc
 // geometry (only its per-instance material's opacity and its mesh's scale/position differ).
@@ -198,6 +238,22 @@ export function initEnemyView(game: GameState): void {
       R.scene.add(shadow);
     }
 
+    // Status icon sprites: a map is assigned up front (never left null) so later frames can
+    // swap which glyph an instance shows by reassigning `.map` without triggering a shader
+    // recompile — SpriteMaterial only needs `needsUpdate` when a map goes from absent to present.
+    const icon1Mat = new THREE.SpriteMaterial({ map: statusIconTexture('stun'), depthWrite: false, transparent: true });
+    const icon1 = new THREE.Sprite(icon1Mat);
+    icon1.scale.set(ICON_SIZE, ICON_SIZE, 1);
+    icon1.renderOrder = 12;
+    icon1.visible = false;
+    R.scene.add(icon1);
+    const icon2Mat = new THREE.SpriteMaterial({ map: statusIconTexture('stun'), depthWrite: false, transparent: true });
+    const icon2 = new THREE.Sprite(icon2Mat);
+    icon2.scale.set(ICON_SIZE, ICON_SIZE, 1);
+    icon2.renderOrder = 12;
+    icon2.visible = false;
+    R.scene.add(icon2);
+
     return {
       defId,
       group,
@@ -214,6 +270,11 @@ export function initEnemyView(game: GameState): void {
       shadow,
       shadowMat,
       shadowBaseR,
+      icon1,
+      icon1Mat,
+      icon2,
+      icon2Mat,
+      wasStunned: false,
     };
   }
 
@@ -229,6 +290,9 @@ export function initEnemyView(game: GameState): void {
     rec.bobPhase = (e.id % 7) * 0.9; // desync bobbing
     rec.lastX = e.pos.x;
     rec.lastZ = e.pos.z;
+    // A freshly (re)acquired enemy never spawns pre-stunned in this game, so starting false
+    // here never causes a false "stun just landed" flash on the very first frame it's seen.
+    rec.wasStunned = false;
     return rec;
   }
 
@@ -236,6 +300,8 @@ export function initEnemyView(game: GameState): void {
     rec.group.visible = false;
     rec.barBg.visible = false;
     rec.barFill.visible = false;
+    rec.icon1.visible = false;
+    rec.icon2.visible = false;
     if (rec.shadow) rec.shadow.visible = false;
     let pool = pools.get(rec.defId);
     if (!pool) {
@@ -324,6 +390,77 @@ export function initEnemyView(game: GameState): void {
             bz + camRight.z * shift + camFwd.z * 0.05,
           );
           rec.fillMat.color.setHSL(frac * 0.33, 0.75, 0.45);
+        }
+
+        // ---- status icons (see the STATUS ICONS section at the top of this file) ----
+        const stunned = isStunned(enemy, g);
+        if (stunned && !rec.wasStunned) {
+          // The moment a stun actually lands: a bright, sharp flash distinct from every other
+          // impact look in the game (fx.ts's IMPACT_EFFECTS), the same regardless of which of
+          // the five stun sources caused it (Fireball rank V, Frost Field Deep Freeze, Shield
+          // Slam, Leap Earthshaker/Shield Charge, Abyssal Grasp mastery) — "stun" reads as one
+          // unmistakable concept everywhere it appears, not five different-looking ones.
+          spawnBurst(rec.group.position, 0xfff9c4, 16, 6, 0.32, { upMin: 0.4, upMax: 1.1, size: 0.3 });
+          spawnRing(rec.group.position, 1.1, 0xfff275, 0.3);
+        }
+        rec.wasStunned = stunned;
+
+        const severity = slowSeverity(enemy, g);
+        const slowKind: StatusIconKind | null = severity <= 0 ? null : severity >= ROOT_SEVERITY_THRESHOLD ? 'root' : 'slow';
+        const marked = isVulnerable(enemy, g);
+        const bleeding = isBleeding(enemy, g);
+        const burning = isBurning(enemy, g);
+
+        // Fixed priority cascade, capped at 2 slots — see the module doc comment for the order
+        // and why. Written as plain branches (not a small helper closure) so nothing allocates
+        // here; this runs for every enemy, every render frame.
+        let iconKind1: StatusIconKind | null = null;
+        let iconKind2: StatusIconKind | null = null;
+        if (stunned) {
+          iconKind1 = 'stun';
+          if (slowKind) iconKind2 = slowKind;
+          else if (marked) iconKind2 = 'mark';
+          else if (bleeding) iconKind2 = 'bleed';
+          else if (burning) iconKind2 = 'burn';
+        } else if (slowKind) {
+          iconKind1 = slowKind;
+          if (marked) iconKind2 = 'mark';
+          else if (bleeding) iconKind2 = 'bleed';
+          else if (burning) iconKind2 = 'burn';
+        } else if (marked) {
+          iconKind1 = 'mark';
+          if (bleeding) iconKind2 = 'bleed';
+          else if (burning) iconKind2 = 'burn';
+        } else if (bleeding) {
+          iconKind1 = 'bleed';
+          if (burning) iconKind2 = 'burn';
+        } else if (burning) {
+          iconKind1 = 'burn';
+        }
+
+        rec.icon1.visible = iconKind1 !== null;
+        rec.icon2.visible = iconKind2 !== null;
+        if (iconKind1 !== null) {
+          const iy = enemy.pos.y + rec.barY + 0.3;
+          const singleSlot = iconKind2 === null;
+          const off1 = singleSlot ? 0 : -ICON_SPACING / 2;
+          rec.icon1Mat.map = statusIconTexture(iconKind1);
+          rec.icon1Mat.color.setHex(STATUS_COLOR[iconKind1]);
+          rec.icon1.position.set(
+            enemy.pos.x + camRight.x * off1,
+            iy + camRight.y * off1,
+            enemy.pos.z + camRight.z * off1,
+          );
+          if (iconKind2 !== null) {
+            const off2 = ICON_SPACING / 2;
+            rec.icon2Mat.map = statusIconTexture(iconKind2);
+            rec.icon2Mat.color.setHex(STATUS_COLOR[iconKind2]);
+            rec.icon2.position.set(
+              enemy.pos.x + camRight.x * off2,
+              iy + camRight.y * off2,
+              enemy.pos.z + camRight.z * off2,
+            );
+          }
         }
       }
 
