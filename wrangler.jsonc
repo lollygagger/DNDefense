@@ -1,0 +1,18 @@
+{
+  // Static-assets Worker: DNDefense is a pure client-side build (index.html + one JS + one CSS),
+  // with no server code at all. Declaring `assets` and omitting `main` tells Wrangler to serve
+  // the built files directly.
+  //
+  // This config also exists to stop Wrangler auto-detecting the project as "Framework: Vite" and
+  // routing the deploy through its Vite plugin, which requires Vite >= 6 and fails the build on
+  // Vite 5 with: "The version of Vite used in the project cannot be automatically configured."
+  // Nothing here needs that plugin — we just hand it a folder of files.
+  "name": "dndefense",
+  "compatibility_date": "2026-08-27",
+  "assets": {
+    "directory": "./dist",
+    // Any unmatched path serves the game rather than a bare 404 — the game has no routes, so a
+    // mistyped URL should still land a tester in the game.
+    "not_found_handling": "single-page-application"
+  }
+}
