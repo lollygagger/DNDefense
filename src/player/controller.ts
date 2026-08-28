@@ -79,7 +79,14 @@ const MAX_Z = WALL_Z[3] + WALL_THICKNESS + STAIR_LENGTH + REAR_MARGIN;
 const FAR_FIELD_MARGIN = 30;
 const MIN_Z = ENEMY_SPAWN_Z + FAR_FIELD_MARGIN; // -50
 
-const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD']);
+/** Movement keys. Arrow keys are full equivalents of WASD, not a lesser fallback — they drive
+ *  the same `forward`/`strafe` axes, so they also steer ladder climbing and everything else
+ *  built on those axes. */
+const MOVE_FORWARD = ['KeyW', 'ArrowUp'];
+const MOVE_BACK = ['KeyS', 'ArrowDown'];
+const MOVE_LEFT = ['KeyA', 'ArrowLeft'];
+const MOVE_RIGHT = ['KeyD', 'ArrowRight'];
+const MOVE_KEYS = new Set([...MOVE_FORWARD, ...MOVE_BACK, ...MOVE_LEFT, ...MOVE_RIGHT]);
 
 /** True while any UI menu/screen is open (owned by the UI module via body dataset). */
 export const isMenuOpen = (): boolean => document.body.dataset.menuOpen === '1';
@@ -458,7 +465,11 @@ export function initPlayer(game: GameState): void {
       e.preventDefault();
       if (!e.repeat) jumpQueued = true;
     }
-    if (MOVE_KEYS.has(e.code)) held.add(e.code);
+    if (MOVE_KEYS.has(e.code)) {
+      // Arrows scroll the page / move focus by default; the game owns them while playing.
+      e.preventDefault();
+      held.add(e.code);
+    }
   });
   document.addEventListener('keyup', (e) => held.delete(e.code));
   addEventListener('blur', () => held.clear());
@@ -616,8 +627,9 @@ export function initPlayer(game: GameState): void {
       let strafe = 0;
       let jump = false;
       if (canMove) {
-        forward = (held.has('KeyW') ? 1 : 0) - (held.has('KeyS') ? 1 : 0);
-        strafe = (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0);
+        const anyHeld = (codes: string[]): number => (codes.some((c) => held.has(c)) ? 1 : 0);
+        forward = anyHeld(MOVE_FORWARD) - anyHeld(MOVE_BACK);
+        strafe = anyHeld(MOVE_RIGHT) - anyHeld(MOVE_LEFT);
         jump = jumpQueued;
       }
       jumpQueued = false;

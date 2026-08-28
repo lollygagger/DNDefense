@@ -425,7 +425,7 @@ per-wave numbers this task's report worked from.
 | Input | Action |
 |---|---|
 | Mouse look (pointer lock) | Aim |
-| WASD / Space | Move / jump |
+| WASD or Arrow keys / Space | Move / jump |
 | W / S at a ladder | Climb up / down — walking into a usable ladder grabs it automatically instead of bonking into the wall; strafe (A/D) to let go, or just reach the top/bottom |
 | LMB | Primary attack / confirm ground-target cast (Archer: hold to draw the bow, release to loose — see Archer primary) |
 | 2, 3, 4 | Use class abilities — ground-targeted ones (including Grapple Hook) arm a decal reticle first and confirm with LMB, aimed ones cast instantly (varies by class, see Player & classes). Grapple Hook's confirm additionally needs a real walkable anchor in range, or it whiffs. Warrior's Leap is the one exception: it's directional, not targeted — pressing its key launches you along your current facing immediately, no reticle at all |

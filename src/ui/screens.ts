@@ -48,9 +48,9 @@ function applySelectedClass(game: GameState, def: PlayerClassDef): void {
 
 const CONTROLS: readonly [key: string, action: string][] = [
   ['Mouse', 'Look / aim'],
-  ['WASD', 'Move'],
+  ['WASD / Arrows', 'Move'],
   ['Space', 'Jump'],
-  ['W / S at a ladder', 'Climb up / down — walk into a wall face where one hangs to grab it'],
+  ['W / S or Up / Down at a ladder', 'Climb up / down — walk into a wall face where one hangs to grab it'],
   ['LMB', 'Primary attack — or confirm a ground-targeted cast'],
   ['2 / 3 / 4', "Use your class's abilities (ground-targeted ones arm a reticle first)"],
   ['RMB / Esc', 'Cancel ability targeting'],
