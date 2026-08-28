@@ -1,11 +1,11 @@
 import type { GameState } from '../sim/GameState';
 import type { Socket, WallTier } from '../sim/types';
-import { getStructureDef, getStructureDefsForSocket } from '../sim/structures';
+import { getStructureDef, getStructureDefsForSocket, nextUpgradeCost } from '../sim/structures';
 import { WALL_UPGRADE_TREE } from '../sim/wallUpgrades';
 import { anyOverlayOpen, escapeHtml, overlayClosed, overlayOpened } from './hud';
 import { renderCastleMenu as renderCastleMenuHtml } from './castleMenu';
 import { handleClassMenuAction, renderClassMenu as renderClassMenuHtml } from './classMenu';
-import { branchColumns, costBtn, nodeState, panel, structureIcon, upgradeNodeHtml, WALL_NAMES } from './menuWidgets';
+import { branchColumns, costBtn, panel, structureIcon, upgradeNodeHtml, WALL_NAMES } from './menuWidgets';
 
 /** Owned by [ui]. The three in-game menus (mutually exclusive):
  *  E = socket build/upgrade, B = castle walls, Tab = class upgrades. Esc closes.
@@ -332,8 +332,10 @@ export function initMenus(game: GameState): void {
     }
     const def = getStructureDef(socket.structure.defId);
     if (!def) return `[E] Structure`;
-    const inst = socket.structure;
-    const hasUpgrade = def.upgrades.some((n) => nodeState(def, inst, n) === 'available');
-    return `[E] ${def.name}${hasUpgrade ? ' — upgrades available' : ''}`;
+    // Same helper the socket beacons in render/castleView.ts use, so the hint and the beacon
+    // colour always agree about whether there's anything left to buy here.
+    const cost = nextUpgradeCost(socket.structure);
+    if (cost === null) return `[E] ${def.name} — fully upgraded`;
+    return `[E] ${def.name} — upgrades available${game.gold >= cost ? '' : ` (${cost}g)`}`;
   }
 }

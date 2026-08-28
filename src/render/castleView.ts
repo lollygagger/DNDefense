@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { GameState } from '../sim/GameState';
-import type { Socket, Wall, WallTier } from '../sim/types';
+import type { Socket, StructureInstance, Wall, WallTier } from '../sim/types';
+import { nextUpgradeCost } from '../sim/structures';
 import { R } from './scene';
 import {
   CHAMBER_ARCH_HEIGHT,
@@ -24,7 +25,8 @@ import {
 } from '../data/castle';
 
 /** Owned by [world-castle]. Castle visuals: crenellated walls, stair ramps, damage tint,
- *  rubble, ghost outlines for unbuilt tiers, glowing empty-socket markers, wall HP bars, ladders.
+ *  rubble, ghost outlines for unbuilt tiers, per-socket state markers (glowing plot marker while
+ *  empty, upgrade-state beacon once built), wall HP bars, ladders.
  *  Reads sim state every frame (never mutates it); walkable surfaces match
  *  sim/castle.worldHeight exactly — wall tops at y=WALL_HEIGHT over z in [w.z, w.z+THICKNESS],
  *  stair ramps behind descending linearly over STAIR_LENGTH. Everything above WALL_HEIGHT
@@ -128,7 +130,17 @@ interface WallView {
   hpBar: THREE.Group;
   hpFill: THREE.Mesh;
   hpFillMat: THREE.MeshBasicMaterial;
-  markers: { socket: Socket; group: THREE.Group }[];
+  // Per socket: `group` is the empty-plot marker (shown only while unbuilt), `beacon` its
+  // built-state counterpart (shown only once a structure exists) — exactly one of the two is
+  // visible at any time, so a socket always reads as *something* from across the courtyard.
+  markers: {
+    socket: Socket;
+    group: THREE.Group;
+    beacon: THREE.Group;
+    gem: THREE.Mesh;
+    gemBaseY: number;
+    lastMat: THREE.Material | null;
+  }[];
   // Higher Battlements: this wall's merlon InstancedMesh + the layout needed to rebuild its
   // instance transforms on demand, plus the last-applied bonus so the (rare) rebuild only runs
   // when it actually changes rather than every frame.
@@ -166,6 +178,15 @@ export function initCastleView(game: GameState): void {
   // Sized ~to the barracks' own footprint now that it marks a ground-level building plot in the
   // courtyard rather than a small wall-top glyph (was 0.5-0.85, tuned for the old position).
   const chamberRingGeo = new THREE.RingGeometry(0.9, 1.3, 24);
+  // Built-socket beacons: a stem + floating gem + base ring standing over every socket that
+  // already HAS a structure — the complement of the empty-socket markers above, which vanish the
+  // moment you build. Without these a finished turret is invisible as an interactable: the only
+  // cue was ui/menus.ts's [E] hint, which needs you within interact range of a socket you have
+  // to already know the location of. Small enough to read as wall dressing at a glance, and
+  // colour-coded by upgrade state (see updateSocketBeacon below).
+  const beaconStemGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.9, 5);
+  const beaconGemGeo = new THREE.OctahedronGeometry(0.3);
+  const beaconRingGeo = new THREE.RingGeometry(0.5, 0.72, 20);
   const hpBgGeo = new THREE.BoxGeometry(8, 0.6, 0.05);
   const hpFillGeo = new THREE.BoxGeometry(7.7, 0.42, 0.09);
   // Ladders: plain wooden rails/rungs, shared geometry+material across all 4 grab-points/wall
@@ -190,6 +211,20 @@ export function initCastleView(game: GameState): void {
   const chamberGlowMat = new THREE.MeshBasicMaterial({
     color: 0xffc94d, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide,
   });
+  // Three shared beacon materials rather than one per socket: the state a beacon is in is
+  // swapped by reassigning .material (updateSocketBeacon), so the pulse below animates every
+  // "ready" beacon in sync off a single opacity write, and the build-phase see-through toggle is
+  // one depthTest flip instead of ~27 (9 sockets x 3 walls at full expansion).
+  const beaconReadyMat = new THREE.MeshBasicMaterial({
+    color: 0xffd24a, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const beaconIdleMat = new THREE.MeshBasicMaterial({
+    color: 0xc2913a, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const beaconDoneMat = new THREE.MeshBasicMaterial({
+    color: 0x74c8a4, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const beaconMats = [beaconReadyMat, beaconIdleMat, beaconDoneMat];
   const hpBgMat = new THREE.MeshBasicMaterial({ color: 0x2a1616, transparent: true, opacity: 0.85 });
   const bannerPoleMat = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
   const bannerMat = new THREE.MeshLambertMaterial({ color: 0x6b3fa0, side: THREE.DoubleSide });
@@ -223,7 +258,33 @@ export function initCastleView(game: GameState): void {
       mg.add(ring);
     }
     g.add(mg);
-    markers.push({ socket: s, group: mg });
+
+    // Built-state beacon, at the same spot the structure itself lands: embrasure turrets sit in
+    // the wall face (render/structureView.ts positions them at socket.muzzlePos), so the beacon
+    // rises off the parapet directly above; chamber buildings sit on the courtyard floor at
+    // CHAMBER_BUILDING_OFFSET, so it stands over the roof. Built here (not in structureView)
+    // because it marks the *socket*, and must survive a structure being destroyed and rebuilt.
+    const bg = new THREE.Group();
+    const onWall = s.kind === 'embrasure';
+    bg.position.set(s.localX, onWall ? H + PARAPET_HEIGHT : 0.02, onWall ? T / 2 : T + CHAMBER_BUILDING_OFFSET);
+    const ring = new THREE.Mesh(beaconRingGeo, beaconIdleMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.04;
+    bg.add(ring);
+    const stemH = onWall ? 0.9 : 3.4; // clear the barracks roof for courtyard chambers
+    const stem = new THREE.Mesh(beaconStemGeo, beaconIdleMat);
+    stem.scale.y = stemH / 0.9;
+    stem.position.y = stemH / 2;
+    bg.add(stem);
+    const gem = new THREE.Mesh(beaconGemGeo, beaconIdleMat);
+    const gemBaseY = stemH + 0.34;
+    gem.position.y = gemBaseY;
+    bg.add(gem);
+    for (const child of bg.children) child.renderOrder = 3; // drawn over the wall when see-through (build phase)
+    bg.visible = false;
+    g.add(bg);
+
+    markers.push({ socket: s, group: mg, beacon: bg, gem, gemBaseY, lastMat: null });
 
     // Sally-port archway through the wall for chambers (permanent wall dressing, both faces —
     // cosmetic only, see archOpeningGeo's comment). Front face (facing the field) mirrors the
@@ -389,6 +450,19 @@ export function initCastleView(game: GameState): void {
       const pulse = 0.45 + 0.3 * Math.sin(t * 2.6);
       embGlowMat.opacity = pulse;
       chamberGlowMat.opacity = 0.45 + 0.3 * Math.sin(t * 2.6 + 1.3);
+      beaconReadyMat.opacity = 0.62 + 0.3 * Math.sin(t * 2.6);
+
+      // During the build phase beacons draw through the walls, so one look around shows every
+      // turret you own and which of them will take your gold — including the ones on a wall
+      // you're standing behind. In combat they go back to normal occlusion so they can't hide
+      // anything you need to see.
+      const seeThrough = game.phase !== 'combat';
+      if (seeThrough === beaconMats[0].depthTest) {
+        for (const mat of beaconMats) {
+          mat.depthTest = !seeThrough;
+          mat.needsUpdate = true;
+        }
+      }
 
       // Front ladders: build-phase-only, mirroring sim/ladders.ts's isLadderUsable exactly (same
       // game.phase !== 'combat' test). The instant combat starts they swing up flush against the
@@ -443,7 +517,24 @@ export function initCastleView(game: GameState): void {
             v.lastSocketCount = w.sockets.length;
           }
 
-          for (const m of v.markers) m.group.visible = !m.socket.structure;
+          // Empty plot -> glowing marker; built -> beacon coloured by what you can do there.
+          for (const m of v.markers) {
+            const structure = m.socket.structure as StructureInstance | null | undefined;
+            m.group.visible = !structure;
+            m.beacon.visible = !!structure;
+            if (!structure) continue;
+            const cost = nextUpgradeCost(structure);
+            const mat = cost === null ? beaconDoneMat : game.gold >= cost ? beaconReadyMat : beaconIdleMat;
+            if (mat !== m.lastMat) {
+              m.lastMat = mat;
+              for (const child of m.beacon.children) (child as THREE.Mesh).material = mat;
+            }
+            // Only an affordable upgrade earns motion — a maxed or unaffordable turret still
+            // shows where it is, but sits still so it never competes for attention mid-wave.
+            const live = mat === beaconReadyMat;
+            m.gem.rotation.y = live ? t * 1.4 : 0;
+            m.gem.position.y = m.gemBaseY + (live ? 0.12 * Math.sin(t * 2.6) : 0);
+          }
         }
 
         // HP bar

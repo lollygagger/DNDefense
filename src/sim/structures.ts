@@ -1,5 +1,5 @@
 import type { GameState } from './GameState';
-import type { StructureDef } from './types';
+import type { StructureDef, StructureInstance } from './types';
 import { crossbowDef, CROSSBOW_DEF_ID, type CrossbowInstance } from './structures/crossbow';
 import { armoryDef, ARMORY_DEF_ID } from './structures/armory';
 import { archerBarracksDef, ARCHER_BARRACKS_DEF_ID } from './structures/archerBarracks';
@@ -41,6 +41,35 @@ export function getStructureDef(id: string): StructureDef | null {
 
 export function getStructureDefsForSocket(kind: 'embrasure' | 'chamber'): StructureDef[] {
   return [...defs.values()].filter((d) => d.socketKind === kind);
+}
+
+/** Cheapest upgrade this structure could buy right now, or null when its tree is finished (every
+ *  node either owned or locked out by an exclusive branch). Gold is deliberately NOT considered —
+ *  callers that care about affordability compare against game.gold themselves.
+ *
+ *  Eligibility mirrors castle.ts's upgradeStructure() exactly (owned / requires / two-way
+ *  excludes) so the socket beacons in render/castleView.ts and the [E] hint in ui/menus.ts can
+ *  never disagree with what the socket menu will actually let you buy. Kept here in sim rather
+ *  than reusing ui/menuWidgets.ts's nodeState() because render must not import from ui. */
+export function nextUpgradeCost(structure: StructureInstance): number | null {
+  const def = getStructureDef(structure.defId);
+  if (!def) return null;
+  let cheapest: number | null = null;
+  for (const node of def.upgrades) {
+    if (structure.purchased.includes(node.id)) continue;
+    if (node.requires && !structure.purchased.includes(node.requires)) continue;
+    let excluded = false;
+    for (const ownedId of structure.purchased) {
+      const owned = def.upgrades.find((n) => n.id === ownedId);
+      if (owned?.excludes?.includes(node.id) || node.excludes?.includes(ownedId)) {
+        excluded = true;
+        break;
+      }
+    }
+    if (excluded) continue;
+    if (cheapest === null || node.cost < cheapest) cheapest = node.cost;
+  }
+  return cheapest;
 }
 
 export function initStructures(game: GameState): void {
