@@ -1214,3 +1214,154 @@ body {
   border: 1px solid var(--stone-600);
   border-radius: 5px;
 }
+
+/* =======================================================================
+   PAUSE + RESUME  (src/ui/pause.ts, src/ui/screens.ts)
+   ======================================================================= */
+
+/* Unlike the start/game-over screens this one sits over a live (frozen) world, so it stays
+   translucent — seeing the paused battlefield behind the panel is the cue that the run is still
+   there, waiting, rather than over. */
+.screen--pause {
+  background: rgba(10, 8, 5, 0.72);
+  backdrop-filter: blur(3px);
+  align-items: center;
+}
+
+.pause-inner {
+  margin: auto;
+  max-width: 520px;
+  gap: 18px;
+}
+
+.pause-title {
+  font-size: clamp(32px, 5vw, 48px);
+  font-weight: 800;
+  color: var(--gold-bright);
+  letter-spacing: 2px;
+  margin: 0;
+}
+
+.pause-save-note {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--parchment-dim);
+}
+
+.pause-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.pause-actions button {
+  width: 100%;
+}
+
+.pause-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--parchment-faint);
+}
+
+/* Resume card on the start screen */
+.resume-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 20px 24px;
+  border: 2px solid var(--gold);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.12) 0%, rgba(212, 175, 55, 0.04) 100%);
+  box-shadow: var(--shadow-strong);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.resume-head {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+}
+
+.resume-line {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--parchment);
+}
+
+.resume-when {
+  font-size: 13px;
+  color: var(--parchment-faint);
+}
+
+.resume-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* Quieter sibling of .btn-primary, for the option that isn't the expected one. */
+.btn-secondary {
+  pointer-events: auto;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--parchment);
+  background: linear-gradient(180deg, var(--stone-700) 0%, var(--stone-800) 100%);
+  border: 2px solid var(--stone-600);
+  border-radius: 8px;
+  padding: 12px 26px;
+  box-shadow: var(--shadow-soft);
+  transition:
+    transform 0.12s ease-out,
+    filter 0.12s ease-out;
+}
+
+.btn-secondary:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.15);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+  filter: brightness(0.96);
+}
+
+/* Destructive: throws the run away. Styled to be clearly reachable but never inviting. */
+.btn-danger {
+  pointer-events: auto;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--parchment);
+  background: linear-gradient(180deg, rgba(179, 58, 58, 0.35) 0%, rgba(179, 58, 58, 0.18) 100%);
+  border: 2px solid var(--danger);
+  border-radius: 8px;
+  padding: 12px 26px;
+  box-shadow: var(--shadow-soft);
+  transition:
+    transform 0.12s ease-out,
+    filter 0.12s ease-out;
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.2);
+}
+
+.btn-danger:active {
+  transform: translateY(0);
+  filter: brightness(0.96);
+}

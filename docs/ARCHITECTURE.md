@@ -27,7 +27,7 @@ Files marked **FROZEN** are the shared contracts — do not modify them; if a co
 ```
 index.html                  FROZEN   canvas + #ui root
 src/main.ts                 FROZEN   boot order, module wiring (one addition: initPlayground, last)
-src/core/loop.ts            FROZEN   fixed-tick accumulator (60 Hz), render on rAF
+src/core/loop.ts            FROZEN   fixed-tick accumulator (60 Hz), render on rAF (+ pause gate, see below)
 src/core/events.ts          FROZEN   typed EventBus + event map
 src/core/rng.ts             FROZEN   seeded RNG
 src/sim/types.ts            FROZEN   shared interfaces (Unit, Wall, Socket, defs...)
@@ -48,6 +48,9 @@ src/data/waves.ts           [enemies-waves]     wave 1-10 definitions
 src/render/enemyView.ts     [enemies-waves]     instanced enemy meshes, health bars
 src/sim/damageEvents.ts     [enemies-waves]     sim->render damage-event queue (DoT bucketing)
 src/render/floatingText.ts  [ability-fx]        pooled floating combat-text sprites
+src/sim/runSnapshot.ts      [ui]                capture/restore a run's progression (pure, no browser APIs)
+src/ui/saveStorage.ts       [ui]                localStorage persistence + autosave timing
+src/ui/pause.ts             [ui]                pause overlay (pointer-lock-loss driven)
 
 src/player/controller.ts    [player-classes]    pointer lock, WASD, worldHeight collision
 src/player/casting.ts       [player-classes]    aim raycast, ground-target reticle, cast commands
@@ -158,3 +161,43 @@ Two notes for anyone editing it:
 
 It deliberately looks like a dev tool (cool cyan against the game's warm gold, a persistent
 corner badge) because it invalidates the economy and difficulty everything else is tuned around.
+
+## Pause + run persistence (`core/loop.ts`, `sim/runSnapshot.ts`, `ui/saveStorage.ts`, `ui/pause.ts`)
+
+**The one change to a FROZEN file.** `core/loop.ts` gained a module-local pause flag plus
+`setLoopPaused()` / `isLoopPaused()`; `startLoop`'s signature and every existing behaviour are
+untouched, and `main.ts` (its only consumer) needed no edit. The gate has to live there because the
+sim's entire notion of "now" is `game.time`, which only that loop advances, and every deadline in
+the game is an absolute comparison against it — cooldowns, `respawnAt`, the wave scheduler's spawn
+times, DoT bucket flushes. A pause that stopped calling `tick()` but let time run would silently
+burn all of them. Freezing the accumulator is the single place that covers every one at once
+without each system having to learn about pausing. Render systems keep running while paused (with
+`dt` clamped to 0) so the frozen world stays drawn under the translucent overlay.
+
+*Multiplayer caveat:* this is a strictly local convenience and is the one place that knowingly
+breaks the "any client can be replaced by a server" framing. A server-authoritative build must not
+gate the shared simulation on one client's pause — the split there is that the server owns the
+accumulator and a paused client merely stops rendering and sending input. Flagged in the file.
+
+**The sim/platform split is deliberate.** `sim/runSnapshot.ts` is pure: it captures a run to a
+plain JSON-able object and replays one back, and touches no browser API, so it stays inside the
+"sim never touches the platform" rule and a future server could reuse it verbatim. `ui/saveStorage.ts`
+owns everything environmental — the localStorage key, schema-version and shape validation, autosave
+debouncing, and the wording on the resume card.
+
+**Restore is a replay, not an assignment.** Rather than writing fields back onto the castle and
+player, `restoreRun()` re-issues the saved purchases through the same public APIs the menus call
+(`buildWall`/`upgradeWall`/`buildStructure`/`upgradeStructure`/`buyAbilityRank`/`buyAbilityTreeNode`)
+with gold temporarily raised so none can fail on cost. Everything derived therefore rebuilds itself
+and cannot drift from a hand-built run: expansion sockets are created by the wall node that grants
+them, structures get real runtime instances, `wall:built`/`structure:built` fire so the render views
+build their meshes, and battlement collision fns get rebuilt. `purchased` arrays are push-ordered,
+so replaying in array order always satisfies each node's `requires` chain. Restore assumes a fresh
+`GameState` — every route back to the title screen reloads the page first.
+
+**Snapshots hold progression only**, never live combat state; see GAME_DESIGN.md's "Pausing and
+saving" for why, and for why saves are written only during the build phase.
+
+Both modules are wired from `initScreens()` rather than `main.ts`, whose boot order stays frozen —
+`ui/screens.ts` already owns the title screen the resume card lives on, and it runs after every sim
+and render system exists, which is exactly what a restore replay needs.

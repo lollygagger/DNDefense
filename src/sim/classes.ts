@@ -86,6 +86,23 @@ export function createPlayer(classDef: PlayerClassDef): PlayerState {
   return player;
 }
 
+/** Swap an already-spawned player onto a class: new def, HP resized to that class's max, and
+ *  ability state reset so no stale rank or cooldown from the previous class's (differently-named)
+ *  abilities lingers. Leaves position/yaw alone — this is a class choice, not a respawn.
+ *
+ *  Shared by the two places a class gets chosen, which must not drift: ui/screens.ts applying the
+ *  start screen's pick onto the player initPlayer() already created, and sim/persistence.ts
+ *  putting a saved run's class back before it replays that run's purchases (which are keyed to
+ *  this class's ability ids and would silently no-op against the wrong def). */
+export function applyClassToPlayer(player: PlayerState, classDef: PlayerClassDef): void {
+  player.classDef = classDef;
+  player.maxHp = classDef.maxHp;
+  player.hp = classDef.maxHp;
+  player.abilityRanks = {};
+  player.cooldowns = {};
+  for (const a of allAbilities(classDef)) player.abilityRanks[a.id] = 0;
+}
+
 export function allAbilities(classDef: PlayerClassDef): AbilityDef[] {
   return [classDef.primary, ...classDef.abilities];
 }

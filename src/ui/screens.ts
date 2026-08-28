@@ -1,9 +1,12 @@
 import type { GameState } from '../sim/GameState';
 import type { PlayerClassDef } from '../sim/types';
 import { CLASS_REGISTRY } from '../data/classRegistry';
-import { allAbilities } from '../sim/classes';
+import { allAbilities, applyClassToPlayer } from '../sim/classes';
+import { restoreRun, type RunSnapshot } from '../sim/runSnapshot';
 import { setSelectedClass } from '../player/classSelect';
 import { escapeHtml, overlayClosed, overlayOpened } from './hud';
+import { initPause } from './pause';
+import { clearSave, describeSave, initAutosave, loadSave } from './saveStorage';
 import { isPlaygroundMode, setPlaygroundMode } from './playground';
 
 /** Owned by [ui]. Two full-screen overlays appended into #ui:
@@ -30,20 +33,14 @@ function classIcon(id: string): string {
   return CLASS_ICONS[id] ?? '⚔️';
 }
 
-/** Apply a chosen class onto the already-spawned local player: swap its class def, resize its
- *  HP to the new class's max, and reset ability state so no stale rank/cooldown from the old
- *  class's (differently-named) abilities lingers. Safe to call before the run starts — the
- *  player can't move or act while phase is still 'menu' (see player/controller.ts), so there's
- *  no mid-cast state to disturb. */
+/** Apply a chosen class onto the already-spawned local player. Safe to call before the run
+ *  starts — the player can't move or act while phase is still 'menu' (see player/controller.ts),
+ *  so there's no mid-cast state to disturb. The swap itself lives in sim/classes.ts because
+ *  sim/runSnapshot.ts's restore path has to perform the identical swap before replaying a saved
+ *  run's purchases, and the two must not drift. */
 function applySelectedClass(game: GameState, def: PlayerClassDef): void {
   const p = game.localPlayer;
-  if (!p) return;
-  p.classDef = def;
-  p.maxHp = def.maxHp;
-  p.hp = def.maxHp;
-  p.abilityRanks = {};
-  p.cooldowns = {};
-  for (const a of allAbilities(def)) p.abilityRanks[a.id] = 0;
+  if (p) applyClassToPlayer(p, def);
 }
 
 const CONTROLS: readonly [key: string, action: string][] = [
@@ -53,7 +50,8 @@ const CONTROLS: readonly [key: string, action: string][] = [
   ['W / S or Up / Down at a ladder', 'Climb up / down — walk into a wall face where one hangs to grab it'],
   ['LMB', 'Primary attack — or confirm a ground-targeted cast'],
   ['2 / 3 / 4', "Use your class's abilities (ground-targeted ones arm a reticle first)"],
-  ['RMB / Esc', 'Cancel ability targeting'],
+  ['RMB', 'Cancel ability targeting'],
+  ['Esc', 'Pause — resume, quit to menu, or restart. Your run saves itself between waves'],
   ['E', 'Socket menu — build or upgrade a structure'],
   ['B', 'Castle menu — build or repair wall tiers'],
   ['Tab', 'Class upgrade menu'],
@@ -81,11 +79,29 @@ function classCardHtml(def: PlayerClassDef, selected: boolean): string {
   </div>`;
 }
 
-function startScreenHtml(selectedId: string | null): string {
+/** The resume card, shown above everything else when a saved run exists. Deliberately the first
+ *  thing on the screen and the only primary-styled button up there: coming back to a run in
+ *  progress is the common case for a returning player, and the destructive options (discard here,
+ *  or starting a new run below) should never be the path of least resistance. */
+function resumeCardHtml(snap: RunSnapshot): string {
+  const { line, when } = describeSave(snap);
+  return `<section class="resume-card" id="resume-card">
+    <div class="resume-head">⏸️ Run in progress</div>
+    <div class="resume-line">${escapeHtml(line)}</div>
+    <div class="resume-when">Saved ${escapeHtml(when)}</div>
+    <div class="resume-actions">
+      <button id="resume-btn" class="btn-primary" type="button">▶️ Continue run</button>
+      <button id="discard-btn" class="btn-secondary" type="button">🗑️ Discard run</button>
+    </div>
+  </section>`;
+}
+
+function startScreenHtml(selectedId: string | null, snap: RunSnapshot | null): string {
   const cards = CLASS_REGISTRY.map((def) => classCardHtml(def, def.id === selectedId)).join('');
   return `<div class="screen-inner">
     <h1 class="game-title">DNDefense</h1>
     <p class="game-subtitle">Hold the wall. Build the keep. Survive the horde.</p>
+    ${snap ? resumeCardHtml(snap) : ''}
 
     <section class="start-section">
       <h2 class="section-heading">Choose your class</h2>
@@ -113,7 +129,7 @@ function startScreenHtml(selectedId: string | null): string {
       <span>🧪 Playground mode — unlimited gold, wave select, instant upgrades</span>
     </label>
 
-    <button id="enter-keep-btn" class="btn-primary btn-enter" type="button">⚔️ Enter the Keep</button>
+    <button id="enter-keep-btn" class="${snap ? 'btn-secondary' : 'btn-primary'} btn-enter" type="button">⚔️ ${snap ? 'Start a new run' : 'Enter the Keep'}</button>
   </div>`;
 }
 
@@ -134,9 +150,14 @@ export function initScreens(game: GameState): void {
 
   let selectedClassId: string | null = CLASS_REGISTRY[0]?.id ?? null;
 
+  // Read once, at boot, before anything can write: the save on disk describes the run the player
+  // last walked away from, and the card built from it has to reflect that state even though the
+  // autosave wiring below starts watching this same GameState moments later.
+  const savedRun = loadSave();
+
   ui.insertAdjacentHTML(
     'beforeend',
-    `<div id="start-screen" class="screen">${startScreenHtml(selectedClassId)}</div>
+    `<div id="start-screen" class="screen">${startScreenHtml(selectedClassId, savedRun)}</div>
      <div id="gameover-screen" class="screen hidden">${gameOverHtml()}</div>`
   );
 
@@ -167,15 +188,52 @@ export function initScreens(game: GameState): void {
     if (def) setSelectedClass(def);
   });
 
+  /** Leave the start screen and hand control to the player. Shared by both entry paths so the
+   *  overlay bookkeeping can't diverge between starting fresh and resuming. */
+  function enterGame(): void {
+    startScreen.classList.add('hidden');
+    overlayClosed('screen');
+  }
+
   enterBtn.addEventListener('click', () => {
     const def = CLASS_REGISTRY.find((d) => d.id === selectedClassId) ?? CLASS_REGISTRY[0];
     if (def) {
       setSelectedClass(def);
       applySelectedClass(game, def);
     }
-    startScreen.classList.add('hidden');
-    overlayClosed('screen');
+    // Starting a new run replaces the old one; drop it now rather than leaving a stale snapshot
+    // that the next build-phase autosave would overwrite anyway.
+    clearSave();
+    enterGame();
     game.setPhase('build');
+  });
+
+  // ---------- resume ----------
+
+  const resumeBtn = document.getElementById('resume-btn');
+  const discardBtn = document.getElementById('discard-btn');
+
+  resumeBtn?.addEventListener('click', () => {
+    if (!savedRun) return;
+    // restoreRun sets the phase itself (build), so there's no setPhase here — a saved run always
+    // comes back at a horn prompt, never mid-wave. See sim/runSnapshot.ts.
+    if (!restoreRun(game, savedRun)) {
+      // The snapshot names a class this build no longer has. Nothing recoverable — drop it and
+      // leave the player on the start screen to pick fresh.
+      clearSave();
+      document.getElementById('resume-card')?.remove();
+      return;
+    }
+    setSelectedClass(game.localPlayer!.classDef);
+    enterGame();
+  });
+
+  discardBtn?.addEventListener('click', () => {
+    clearSave();
+    document.getElementById('resume-card')?.remove();
+    enterBtn.classList.remove('btn-secondary');
+    enterBtn.classList.add('btn-primary');
+    enterBtn.textContent = '⚔️ Enter the Keep';
   });
 
   // ---------- game over screen ----------
@@ -190,6 +248,13 @@ export function initScreens(game: GameState): void {
   });
 
   tryAgainBtn.addEventListener('click', () => {
-    location.reload();
+    location.reload(); // the save was already cleared by the game:over handler in saveStorage.ts
   });
+
+  // ---------- persistence + pause ----------
+  // Both are wired from here rather than main.ts, whose boot order is FROZEN: this module already
+  // owns the start screen the resume card lives on, and initScreens() runs after every sim and
+  // render system exists, which is exactly what a restore replay needs.
+  initAutosave(game, { enabled: () => !isPlaygroundMode() });
+  initPause(game);
 }

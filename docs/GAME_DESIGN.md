@@ -450,15 +450,49 @@ per-wave numbers this task's report worked from.
 | W / S at a ladder | Climb up / down — walking into a usable ladder grabs it automatically instead of bonking into the wall; strafe (A/D) to let go, or just reach the top/bottom |
 | LMB | Primary attack / confirm ground-target cast (Archer: hold to draw the bow, release to loose — see Archer primary) |
 | 2, 3, 4 | Use class abilities — ground-targeted ones (including Grapple Hook) arm a decal reticle first and confirm with LMB, aimed ones cast instantly (varies by class, see Player & classes). Grapple Hook's confirm additionally needs a real walkable anchor in range, or it whiffs. Warrior's Leap is the one exception: it's directional, not targeted — pressing its key launches you along your current facing immediately, no reticle at all |
-| RMB / Esc | Cancel ability targeting |
+| RMB | Cancel ability targeting |
+| Esc | Pause (also cancels ability targeting). Losing pointer lock at all — alt-tab, clicking away — pauses too |
 | E | Socket menu (build/upgrade structure in the socket you're near) |
 | B | Castle menu (build/repair wall tiers) |
 | Tab | Class upgrade menu |
 | G | Start next wave (intermission) |
 | P | Playground tools (only in playground mode) |
 
+## Pausing and saving
+
+**Esc pauses.** More precisely, *losing pointer lock* pauses: the browser eats the Esc keypress
+itself to release the mouse and never delivers it to the page, so a key handler alone would need
+Esc pressed twice. Treating "the pointer got away" as "pause" is the right rule regardless —
+without the lock you can't look or aim, so alt-tabbing or clicking away shouldn't let a wave eat
+the keep while you're gone. The pause overlay is translucent so the frozen battlefield stays
+visible behind it, and offers **Resume**, **Quit to main menu**, and **Restart run**. Opening the
+castle/socket/class menus does *not* pause; those are a normal part of the build phase.
+
+Pausing freezes `game.time` itself, not just the tick loop — every deadline in the game (ability
+cooldowns, respawn timers, wave spawn schedule, damage-over-time flushes) is an absolute
+comparison against it, so a pause that let time run would quietly burn all of them at once.
+
+**Your run saves itself, and only during the build phase.** Progress lives in browser storage
+(not a cookie — see saveStorage.ts), so closing the tab and coming back later offers a **Continue
+run** card on the title screen showing the wave, class, gold and structures you left behind, next
+to **Discard run**. Starting a new run replaces the saved one, and dying clears it.
+
+A snapshot holds **progression only**: gold, wave reached, walls and their upgrades, structures
+and theirs, and your class, ranks and mastery nodes. It holds no live combat state, so resuming
+always puts you at the **start of the build phase for the wave you were on** — quit mid-wave and
+you re-fight that wave rather than resuming frozen mid-swing. Two deliberate consequences:
+
+- Saving *only* in the build phase is what keeps this honest. If combat wrote saves too, gold
+  earned partway through a wave you'd then replay would bank permanently, turning quit-and-resume
+  into a gold farm.
+- Restoring **replays your purchases** through the same APIs the menus call rather than writing
+  state back directly, so everything derived — expansion sockets, structure internals, rebuilt
+  meshes, battlement collision — comes back exactly as if you'd bought it by hand.
+
+Playground runs never save; they're explicitly not scored.
+
 ## Future (out of scope for v1, design toward it)
 
 - More classes (Cleric...), more structures/enemies, boss variety
 - **Multiplayer**: co-op party defense. The simulation is built for it now — see ARCHITECTURE.md (deterministic fixed tick, command-based input, seeded RNG, multi-player state list).
-- Desktop packaging (Tauri/Electron), audio, save/meta-progression
+- Desktop packaging (Tauri/Electron), audio, cross-device meta-progression (per-run saving now exists — see Pausing and saving)
