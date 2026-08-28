@@ -30,6 +30,7 @@ import {
   EMBRASURE_MUZZLE_HEIGHT_FRAC,
   EMBRASURE_XS,
   REPAIR_COST_PER_HP,
+  STRUCTURE_SELL_REFUND_PCT,
   STAIR_HALF_WIDTH,
   STAIR_LENGTH,
   STAIR_X,
@@ -286,6 +287,57 @@ class Castle implements CastleApi {
     socket.structure = def.create(socket, this.game);
     this.game.events.emit('structure:built', { socketId, defId });
     return true;
+  }
+
+  /** Gold selling this socket's structure would return right now, or null when there's nothing
+   *  sellable there. Exposed separately from sellStructure so the socket menu can price the
+   *  button without performing the sale — the two share this one calculation, so what the button
+   *  promises and what you actually receive can never drift apart. */
+  structureRefund(socketId: string): number | null {
+    const socket = this.getSocketById(socketId);
+    const structure = socket?.structure as StructureInstance | undefined | null;
+    if (!socket || !structure) return null;
+    const def = getStructureDef(structure.defId);
+    if (!def) return null;
+    // Everything sunk in, not just the build cost: a crossbow with 1600g of Mastery in it is a
+    // 1600g decision, and refunding only the 60g base would make upgrading feel like a trap.
+    let invested = def.cost;
+    for (const nodeId of structure.purchased) {
+      const node = def.upgrades.find((n) => n.id === nodeId);
+      if (node) invested += node.cost;
+    }
+    return Math.floor((invested * STRUCTURE_SELL_REFUND_PCT) / 100);
+  }
+
+  /** Sell the structure in this socket, freeing it to be rebuilt with something else. Returns the
+   *  gold refunded, or null if there was nothing to sell (or it isn't the build phase).
+   *
+   *  BUILD PHASE ONLY, which is a design constraint rather than a technical one. A wall that is
+   *  about to fall takes its structures with it, so a mid-combat sale would let you strip the
+   *  outer wall the instant it looked doomed and bank half of everything on it — turning a lost
+   *  wall from a real setback into a refund, and rewarding exactly the passive play the wave
+   *  pacing is built to discourage.
+   *
+   *  Routes through the same onDestroyed + `structure:destroyed` path a wall collapse uses, so a
+   *  sold spawner disbands its squad and the render views drop its mesh, identically. */
+  sellStructure(socketId: string): number | null {
+    if (this.game.phase !== 'build') return null;
+    const socket = this.getSocketById(socketId);
+    const structure = socket?.structure as StructureInstance | undefined | null;
+    if (!socket || !structure) return null;
+    const refund = this.structureRefund(socketId);
+    if (refund === null) return null;
+
+    structure.onDestroyed?.(this.game);
+    this.game.events.emit('structure:destroyed', { socketId: socket.id, defId: structure.defId });
+    socket.structure = null;
+
+    // Deliberately NOT game.addGold(): that also credits `goldEarned`, the end-of-run "Gold
+    // Earned" statistic. A refund is gold you already earned coming back, so putting it through
+    // addGold would count the same kill twice in the run summary.
+    this.game.gold += refund;
+    this.game.events.emit('gold:changed', { gold: this.game.gold, delta: refund });
+    return refund;
   }
 
   upgradeStructure(socketId: string, nodeId: string): boolean {

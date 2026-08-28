@@ -22,6 +22,15 @@ export const WALL_COST: Record<1 | 2 | 3, number> = { 1: 100, 2: 100, 3: 0 };
 
 export const REPAIR_COST_PER_HP = 0.3;
 
+/** Percent of everything sunk into a structure — its build cost plus every upgrade node bought
+ *  for it — handed back when you sell it. Half, deliberately: enough that committing to a
+ *  crossbow early never locks you out of the flamethrower you'd rather have there by wave 15,
+ *  but a real loss, so a socket choice still costs something. It also has to stay below 100 for
+ *  a structural reason, not just a balance one — at 100 you could freely sell every structure
+ *  before each wave and rebuild the perfect counter-composition afterwards, and the socket
+ *  decisions the whole build phase is made of would stop being decisions. */
+export const STRUCTURE_SELL_REFUND_PCT = 50;
+
 export const EMBRASURE_XS = [-12, 0, 12]; // static-defense sockets on the front face
 export const CHAMBER_XS = [-6, 6]; // spawner sockets inside the wall
 

@@ -2,6 +2,7 @@ import type { GameState } from '../sim/GameState';
 import type { Socket, WallTier } from '../sim/types';
 import { getStructureDef, getStructureDefsForSocket, nextUpgradeCost } from '../sim/structures';
 import { WALL_UPGRADE_TREE } from '../sim/wallUpgrades';
+import { STRUCTURE_SELL_REFUND_PCT } from '../data/castle';
 import { anyOverlayOpen, escapeHtml, overlayClosed, overlayOpened } from './hud';
 import { renderCastleMenu as renderCastleMenuHtml } from './castleMenu';
 import { handleClassMenuAction, renderClassMenu as renderClassMenuHtml } from './classMenu';
@@ -22,6 +23,13 @@ import { branchColumns, costBtn, panel, structureIcon, upgradeNodeHtml, WALL_NAM
  *  own copy for the read-only half it needs — see that file's comment). */
 interface WallUpgradable {
   upgradeWall(tier: WallTier, nodeId: string): boolean;
+}
+
+/** Selling likewise lives on the Castle class rather than the FROZEN CastleApi — same
+ *  narrow-local-interface + cast this file already uses for wall upgrades. */
+interface StructureSellable {
+  structureRefund(socketId: string): number | null;
+  sellStructure(socketId: string): number | null;
 }
 
 const SOCKET_RANGE = 6;
@@ -51,6 +59,13 @@ export function initMenus(game: GameState): void {
 
   /** Last HTML actually written to the DOM, so an unchanged live refresh can be skipped entirely
    *  — see renderMenu(). Cleared on close so reopening always rebuilds. */
+  /** Two-step confirm for selling: the first click arms, the second commits. Selling is
+   *  irreversible and can throw away a four-figure Mastery investment, and the socket menu is a
+   *  dense grid of buttons a misclick can easily land in — an undoable action in that context
+   *  needs more than a single click. Reset whenever the menu opens, closes, or changes socket, so
+   *  an arm can never survive into a different structure than the one it was aimed at. */
+  let sellArmed = false;
+
   let lastHtml: string | null = null;
 
   /** True between pointerdown and pointerup anywhere on the page. The live refresh is held off
@@ -70,6 +85,7 @@ export function initMenus(game: GameState): void {
     open = null;
     socketId = null;
     castleWallFocus = null;
+    sellArmed = false;
     root.style.display = 'none';
     root.innerHTML = '';
     lastHtml = null;
@@ -98,6 +114,7 @@ export function initMenus(game: GameState): void {
       socketId = socket.id;
     }
     open = id;
+    sellArmed = false;
     root.style.display = '';
     overlayOpened('menu');
     renderMenu();
@@ -135,6 +152,26 @@ export function initMenus(game: GameState): void {
       const body = root.querySelector<HTMLElement>('.menu-body');
       if (body) body.scrollTop = prevScroll; // clamps itself if the content got shorter
     }
+  }
+
+  /** Footer of the built-structure panel: what you'd get back, and the button to take it. Priced
+   *  from the sim's own structureRefund() rather than recomputed here, so the number on the button
+   *  is by construction the number you receive. */
+  function sellRowHtml(sid: string): string {
+    const refund = (game.castle as unknown as StructureSellable).structureRefund(sid);
+    if (refund === null) return '';
+    if (game.phase !== 'build') {
+      return `<div class="sell-row">
+        <div class="sell-note">Structures can only be sold between waves.</div>
+      </div>`;
+    }
+    const btn = sellArmed
+      ? `<button class="btn btn-sell armed" data-action="sell-structure" data-arg="${escapeHtml(sid)}">⚠️ Confirm — sell for ${refund}💰</button>`
+      : `<button class="btn btn-sell" data-action="sell-structure" data-arg="${escapeHtml(sid)}">🔨 Sell for ${refund}💰</button>`;
+    return `<div class="sell-row">
+      <div class="sell-note">Frees the socket and refunds ${STRUCTURE_SELL_REFUND_PCT}% of everything spent here${sellArmed ? '' : ' — upgrades included'}.</div>
+      ${btn}
+    </div>`;
   }
 
   // ---------- socket menu ----------
@@ -175,7 +212,8 @@ export function initMenus(game: GameState): void {
       )
       .join('');
     const body = `<div class="row-desc">${escapeHtml(def.desc)}</div>
-      ${def.upgrades.length > 0 ? `<div class="upgrade-cols">${cols}</div>` : `<div class="menu-empty">No upgrades.</div>`}`;
+      ${def.upgrades.length > 0 ? `<div class="upgrade-cols">${cols}</div>` : `<div class="menu-empty">No upgrades.</div>`}
+      ${sellRowHtml(socket.id)}`;
     return panel(`${structureIcon(def)} ${escapeHtml(def.name)} — ${WALL_NAMES[socket.tier]}`, body);
   }
 
@@ -222,6 +260,9 @@ export function initMenus(game: GameState): void {
       return;
     }
     const socket = socketId ? game.castle.getSocketById(socketId) : null;
+    // Any other button in the panel disarms a pending sell: an armed confirm that survives you
+    // going off to buy an upgrade would be lying in wait for an unrelated later click.
+    if (action !== 'sell-structure') sellArmed = false;
     switch (action) {
       case 'build-structure': {
         const def = getStructureDef(arg);
@@ -245,6 +286,22 @@ export function initMenus(game: GameState): void {
           `${node.name} purchased! ✨`,
           `Upgrade unavailable.`
         );
+        break;
+      }
+      case 'sell-structure': {
+        if (!socket || !socket.structure) break;
+        if (!sellArmed) {
+          sellArmed = true; // first click only arms; the re-render below swaps in the confirm button
+          break;
+        }
+        sellArmed = false;
+        const def = getStructureDef(socket.structure.defId);
+        const refund = (game.castle as unknown as StructureSellable).sellStructure(socket.id);
+        if (refund === null) {
+          toast('Cannot sell that right now.');
+          break;
+        }
+        toast(`${def?.name ?? 'Structure'} sold — ${refund}💰 refunded 🔨`);
         break;
       }
       case 'build-wall': {

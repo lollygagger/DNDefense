@@ -45,6 +45,24 @@ World axes: **X** = lateral (along walls), **Z** = depth (enemies approach from 
 
 Player installs/upgrades by looking at a socket within ~6m and pressing **E** (contextual menu).
 
+**Selling.** A built structure can be sold from that same menu, refunding **50% of everything
+sunk into it** — build cost plus every upgrade node bought for it, not just the base price, since
+a crossbow with 1600g of Mastery in it is a 1600g decision and refunding only the 60g base would
+make upgrading feel like a trap. The socket is then free for something else. Two deliberate
+limits:
+
+- **Build phase only.** A wall that falls takes its structures with it, so a mid-combat sale would
+  let you strip the outer wall the moment it looked doomed and bank half of everything on it —
+  turning a lost wall from a real setback into a refund.
+- **Never 100%.** At a full refund you could sell everything between waves and rebuild the perfect
+  counter-composition each time, and the socket choices the build phase is made of would stop
+  being choices. Half is enough to escape a commitment that stopped making sense, and cheap
+  enough that you feel it.
+
+Selling routes through the same path a wall collapse uses, so a sold spawner stops respawning
+exactly as a smashed one does — the squad already in the field keeps fighting and simply isn't
+replaced. Selling asks for a second click to confirm; it can't be undone.
+
 **Socket state is always readable at a distance.** Every socket carries a permanent marker, so you never have to remember where you put something or walk the whole wall to find it:
 
 | Socket state | Marker |
