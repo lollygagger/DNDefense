@@ -41,10 +41,20 @@ export interface ArcLightningInstance extends StructureInstance {
   firedAt: number;
 }
 
-function resolveArcLightningStats(purchased: string[]): { damage: number; chainJumps: number; chainRadius: number } {
+function resolveArcLightningStats(purchased: string[]): {
+  damage: number;
+  chainJumps: number;
+  chainRadius: number;
+  range: number;
+} {
   if (purchased.includes('overcharge2')) return ARC_LIGHTNING.upgrades.overcharge2;
   if (purchased.includes('overcharge1')) return ARC_LIGHTNING.upgrades.overcharge1;
-  return { damage: ARC_LIGHTNING.damage, chainJumps: ARC_LIGHTNING.chainJumps, chainRadius: ARC_LIGHTNING.chainRadius };
+  return {
+    damage: ARC_LIGHTNING.damage,
+    chainJumps: ARC_LIGHTNING.chainJumps,
+    chainRadius: ARC_LIGHTNING.chainRadius,
+    range: ARC_LIGHTNING.range,
+  };
 }
 
 class ArcLightningStructure implements ArcLightningInstance {
@@ -68,9 +78,12 @@ class ArcLightningStructure implements ArcLightningInstance {
     // Anti-air gate (Phase 2 roadmap) — true for this tower (data/structures.ts): a chain can
     // jump to (and start on) a flying enemy exactly like a grounded one.
     const hitsAir = structureCanHitAir(ARC_LIGHTNING_DEF_ID);
+    // Resolved before acquisition, not just before firing: range is now a per-level stat, so it
+    // has to gate which enemies this tower will even track.
+    const stats = resolveArcLightningStats(this.purchased);
 
     let first: Enemy | null = null;
-    let bestDist = ARC_LIGHTNING.range;
+    let bestDist = stats.range; // resolved per level — Overcharge extends reach, not just damage
     for (const e of game.enemies) {
       if (!e.alive) continue;
       if (e.pos.z >= wall.z) continue; // in front of this wall only — same gate every embrasure structure uses
@@ -94,7 +107,6 @@ class ArcLightningStructure implements ArcLightningInstance {
     if (ddx * ddx + ddz * ddz > 1e-6) this.aimYaw = Math.atan2(ddx, ddz);
 
     if (game.time < this.nextFireAt) return;
-    const stats = resolveArcLightningStats(this.purchased);
     this.nextFireAt = game.time + ARC_LIGHTNING.fireInterval;
     this.firedAt = game.time;
 
@@ -133,21 +145,21 @@ class ArcLightningStructure implements ArcLightningInstance {
 export const arcLightningDef: StructureDef = {
   id: ARC_LIGHTNING_DEF_ID,
   name: 'Arc Lightning Tower',
-  desc: `Mid-range bolt (range ${ARC_LIGHTNING.range}) that chains to nearby enemies — including flying ones — with damage falling off each jump. Rewards enemies standing close together; against one isolated target it's just a single, unremarkable hit.`,
+  desc: `Long-reaching bolt (range ${ARC_LIGHTNING.range}) that chains to nearby enemies — including flying ones — with damage falling off each jump. Rewards enemies standing close together; against one isolated target it's just a single, unremarkable hit.`,
   cost: ARC_LIGHTNING.cost,
   socketKind: 'embrasure',
   upgrades: [
     {
       id: 'overcharge1',
       name: 'Overcharge',
-      desc: `${ARC_LIGHTNING.upgrades.overcharge1.damage} damage, chains to ${ARC_LIGHTNING.upgrades.overcharge1.chainJumps} more targets, jump radius ${ARC_LIGHTNING.upgrades.overcharge1.chainRadius}.`,
+      desc: `${ARC_LIGHTNING.upgrades.overcharge1.damage} damage, range ${ARC_LIGHTNING.upgrades.overcharge1.range}, chains to ${ARC_LIGHTNING.upgrades.overcharge1.chainJumps} more targets, jump radius ${ARC_LIGHTNING.upgrades.overcharge1.chainRadius}.`,
       cost: ARC_LIGHTNING.upgrades.overcharge1.cost,
       requires: null,
     },
     {
       id: 'overcharge2',
       name: 'Overcharge II',
-      desc: `${ARC_LIGHTNING.upgrades.overcharge2.damage} damage, chains to ${ARC_LIGHTNING.upgrades.overcharge2.chainJumps} more targets (total), jump radius ${ARC_LIGHTNING.upgrades.overcharge2.chainRadius}.`,
+      desc: `${ARC_LIGHTNING.upgrades.overcharge2.damage} damage, range ${ARC_LIGHTNING.upgrades.overcharge2.range} — far enough to reach the archers' firing line — chains to ${ARC_LIGHTNING.upgrades.overcharge2.chainJumps} more targets (total), jump radius ${ARC_LIGHTNING.upgrades.overcharge2.chainRadius}.`,
       cost: ARC_LIGHTNING.upgrades.overcharge2.cost,
       requires: 'overcharge1',
     },

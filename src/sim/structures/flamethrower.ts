@@ -7,9 +7,10 @@ import { isFlyerDef } from '../../data/enemies';
 /** Owned by [structures-allies]. Flamethrower — Phase 2 roadmap's "short range but big aoe that
  *  increases with level," and the deliberate opposite trade from the crossbow: a very short,
  *  wide cone of continuous fire instead of one precise long-range bolt. Devastating against a
- *  swarm packed against the wall face; useless at any real distance (a skeleton archer standing
- *  off at range 22 never enters even the max-level 14-range cone) and can't touch anything
- *  airborne at all (see STRUCTURE_ANTI_AIR in data/structures.ts).
+ *  swarm packed against the wall face; useless at any real distance — sim/enemies.ts holds ranged
+ *  attackers on a firing line 20 out from the wall, and the max-level cone reaches 18, so even
+ *  fully upgraded it deliberately falls short of answering an archer — and it can't touch
+ *  anything airborne at all (see STRUCTURE_ANTI_AIR in data/structures.ts).
  *
  *  DAMAGE MODEL — true damage-over-time, not a projectile-spam loop. Every tick it applies
  *  `dps * dt` directly to every enemy currently inside its cone via `takeDamage`, the same

@@ -45,13 +45,18 @@ export const CROSSBOW = {
  *  so it's a deliberate non-answer to balloons/dragons, unlike the crossbow or arc lightning. */
 export const FLAMETHROWER = {
   cost: 130,
-  range: 7, // vs the crossbow's 30 — must let enemies close almost to the wall face to matter
+  // Still far and away the shortest reach on the wall (crossbow 30, arc lightning 26) — that is
+  // the whole trade for the widest area and the highest sustained dps in the game. The ceiling is
+  // deliberately parked just under 20: sim/enemies.ts holds ranged attackers on a firing line
+  // exactly 20 out from the wall, so even a fully upgraded flamethrower falls a couple of units
+  // short of answering an archer. It is the swarm-at-the-wall specialist, and it stays one.
+  range: 10,
   halfArcDeg: 50, // ~100 degree total cone in front of the muzzle
-  dps: 42,
+  dps: 58,
   fxPulseInterval: 0.12, // throttles the "still burning" visual indicator only, not gameplay
   upgrades: {
-    inferno1: { cost: 100, range: 10, halfArcDeg: 62, dps: 68 },
-    inferno2: { cost: 170, range: 14, halfArcDeg: 75, dps: 108 }, // total, replaces inferno1
+    inferno1: { cost: 100, range: 14, halfArcDeg: 62, dps: 95 },
+    inferno2: { cost: 170, range: 18, halfArcDeg: 75, dps: 155 }, // total, replaces inferno1
   },
 };
 
@@ -70,15 +75,19 @@ export const FLAMETHROWER = {
  *  ranged, magical anti-air pick, as opposed to the crossbow's incidental one). */
 export const ARC_LIGHTNING = {
   cost: 150,
-  range: 20,
+  // Range now scales with the tree (it used to be flat at every level). At max it reaches past
+  // the ranged-enemy firing line 20 out from the wall, which makes it the one embrasure structure
+  // that can answer skeleton archers on its own — a real reason to take it over the crossbow's
+  // raw single-target damage, on top of being the anti-air pick.
+  range: 26,
   fireInterval: 1.6,
-  damage: 26,
+  damage: 36,
   chainRadius: 6,
   chainFalloff: 0.65, // running damage multiplies by this on every jump
   chainJumps: 2, // additional targets beyond the first (3 hit total)
   upgrades: {
-    overcharge1: { cost: 110, damage: 34, chainJumps: 3, chainRadius: 7 },
-    overcharge2: { cost: 190, damage: 46, chainJumps: 4, chainRadius: 8.5 }, // total, replaces overcharge1
+    overcharge1: { cost: 110, damage: 50, chainJumps: 3, chainRadius: 7, range: 30 },
+    overcharge2: { cost: 190, damage: 70, chainJumps: 4, chainRadius: 8.5, range: 34 }, // total, replaces overcharge1
   },
 };
 

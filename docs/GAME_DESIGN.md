@@ -271,27 +271,36 @@ first upgrade:
   it whiffs.
 
 ### Flamethrower (static defense, embrasure socket) — 130g
-The opposite trade from the crossbow: a very short range (7, growing to 14 at max level) but wide
-continuous cone (100°, growing to 150°) of true damage-over-time (42 dps, growing to 108),
+The opposite trade from the crossbow: a short range (10, growing to 18 at max level) but wide
+continuous cone (100°, growing to 150°) of true damage-over-time (58 dps, growing to 155),
 applied directly every tick rather than spawned projectiles — reads identically at any tick rate.
-Devastating against a swarm packed against the wall face; useless at any real distance (a
-skeleton archer standing off at range 22 never enters even the max-level cone). Ground-only —
-cannot hit flying enemies at all, unlike every other static defense — so it's a deliberate
-non-answer to balloons/dragons, not an oversight.
-- **Inferno Nozzle** (100g): range 10, cone 124°, 68 dps.
-- **Inferno Nozzle II** (170g): range 14, cone 150°, 108 dps.
+Easily the highest sustained damage on the wall, and still the shortest reach on it by a wide
+margin (crossbow 30, Arc Lightning 26-34) — that is the whole trade.
+Devastating against a swarm packed against the wall face; useless at any real distance. The
+ceiling of 18 is deliberately parked just under 20, the firing line ranged attackers hold (see
+"Ranged attackers hold a wall-relative firing line"), so even a maxed flamethrower falls a couple
+of units short of answering an archer and stays the swarm specialist. Ground-only — cannot hit
+flying enemies at all, unlike every other static defense — so it's a deliberate non-answer to
+balloons/dragons, not an oversight.
+- **Inferno Nozzle** (100g): range 14, cone 124°, 95 dps.
+- **Inferno Nozzle II** (170g): range 18, cone 150°, 155 dps.
 
 ### Arc Lightning Tower (static defense, embrasure socket) — 150g
-A mid-range (20-unit) chain attack: each shot hits the nearest enemy in range, then jumps to the
-nearest *other* enemy within jump radius of the last one hit (never repeating a target in the
-same volley), with damage falling off on every jump. Base: 26 dmg every 1.6s, chains to 2
-additional targets, jump radius 6. Rewards enemies standing near each other;
+A long-reaching (26-unit, growing to 34) chain attack: each shot hits the nearest enemy in range,
+then jumps to the nearest *other* enemy within jump radius of the last one hit (never repeating a
+target in the same volley), with damage falling off on every jump. Base: 36 dmg every 1.6s, chains
+to 2 additional targets, jump radius 6. Rewards enemies standing near each other;
 against one truly isolated target it's just a single, unremarkable hit — worse per-shot than a
 plain crossbow bolt. Chains through the air exactly like across the ground (hits flying enemies),
 making it the ranged, magical anti-air pick, as opposed to the crossbow's incidental one and the
 flamethrower's total lack of one.
-- **Overcharge** (110g): 34 dmg, chains to 3 targets, jump radius 7.
-- **Overcharge II** (190g): 46 dmg, chains to 4 targets (total), jump radius 8.5 (total).
+
+Range now scales with the tree rather than being flat at every level, and past the first
+Overcharge it clears the 20-unit firing line ranged attackers hold — so it is the one embrasure
+structure that answers skeleton archers by itself. That, plus anti-air, is its case against the
+crossbow's raw single-target damage.
+- **Overcharge** (110g): 50 dmg, range 30, chains to 3 targets, jump radius 7.
+- **Overcharge II** (190g): 70 dmg, range 34, chains to 4 targets (total), jump radius 8.5 (total).
 
 ### Swordsman Armory (spawner, chamber socket) — 80g
 Maintains up to 3 swordsman allies (60 HP, 12 dmg swings, speed 4.8); one respawns every 8s.
