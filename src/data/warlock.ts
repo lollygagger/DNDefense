@@ -41,7 +41,12 @@ interface CastleBlocking {
   blocksProjectile(from: Vector3, to: Vector3, outHit: Vector3): boolean;
 }
 
-const BEAM_HIT_RADIUS = 1.3; // matches the perpendicular-distance hitscan radius pinningShot/piercingShot's mark-check use
+/** Base acquisition radius of the beam: how far off-centre an enemy can be and still be caught
+ *  by the hitscan. Matches the perpendicular-distance radius pinningShot/piercingShot's
+ *  mark-check use. Now a per-rank `beamRadius` stat rather than a fixed constant (rank V widens
+ *  it), but the base value stays here because the render layer needs a reference to express the
+ *  beam's on-screen girth as a multiple of "normal" — see actionState.channelGirth below. */
+const BEAM_BASE_RADIUS = 1.3;
 const hitScratch = new Vector3(); // module-scope: the beam ticks every ~0.15s, never allocate in that path
 
 /** Per-caster "am I still locked onto the same target, uninterrupted?" state — PlayerState
@@ -71,14 +76,21 @@ const soulSiphon: AbilityWithTree = {
     // enemy melee both matter, unlike the Mage's safer bolt range), the tick interval itself
     // (read back out in cast() so a future retune of the cooldown can't silently desync the
     // dps->per-tick-damage conversion), and the ramp shape.
-    { cost: 0, stats: { dps: 30, range: 25, tickInterval: 0.15, rampTime: 3, rampBonusPct: 80, channel: 1, moveSpeedMult: 0.6 } },
+    { cost: 0, stats: { dps: 30, range: 25, beamRadius: BEAM_BASE_RADIUS, tickInterval: 0.15, rampTime: 3, rampBonusPct: 80, channel: 1, moveSpeedMult: 0.6 } },
     { cost: 40, stats: { dps: 46 } },
     { cost: 80, stats: { dps: 66 } },
     { cost: 140, stats: { dps: 92 } },
     // Rank V (late-game gold sink, unlocks behaviour): "Soul Drain" — once a target is fully
     // ramped, a third of the damage you're already dealing comes back as healing. Nothing new to
     // aim or press; a well-held beam simply starts sustaining you too.
-    { cost: 220, stats: { dps: 118, lifestealPct: 35 } },
+    //
+    // It also widens the beam (1.3 -> 2.2) and reaches 5 further (25 -> 30). Both serve the same
+    // end as the lifesteal: the ramp is the whole ability, and everything that breaks the lock —
+    // a target sidestepping out of a narrow beam, or walking just past the edge of your reach —
+    // resets it to zero. A wider, longer beam doesn't hit more enemies at once (the hitscan still
+    // locks the single nearest one, by design), it makes the lock you already have much harder to
+    // lose, which is where a maxed channel's damage actually comes from.
+    { cost: 220, stats: { dps: 118, lifestealPct: 35, beamRadius: 2.2, range: 30 } },
   ],
   tree: soulSiphonTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -88,6 +100,7 @@ const soulSiphon: AbilityWithTree = {
     else dir.divideScalar(len);
 
     const range = stats.range;
+    const beamRadius = stats.beamRadius ?? BEAM_BASE_RADIUS;
     const far = origin.clone().addScaledVector(dir, range);
     const castle = game.castle as unknown as CastleBlocking;
     let maxDist = range;
@@ -103,7 +116,7 @@ const soulSiphon: AbilityWithTree = {
       const t = toE.dot(dir);
       if (t < 0 || t > maxDist) continue;
       const perpSq = toE.lengthSq() - t * t;
-      const rr = BEAM_HIT_RADIUS + e.radius;
+      const rr = beamRadius + e.radius;
       if (perpSq > rr * rr) continue;
       if (t < bestT) {
         bestT = t;
@@ -132,6 +145,10 @@ const soulSiphon: AbilityWithTree = {
     // Hook already establishes (it sets actionState.grappleAnchor directly from its own cast()).
     actionState.channelRamp01 = ramp01;
     actionState.channelEndPoint = endPoint;
+    // Presentation girth as a multiple of the base beam, so a widened rank-V beam actually looks
+    // wider instead of the upgrade being invisible. Deliberately proportional rather than the raw
+    // radius: 1.3 world units of acquisition tolerance drawn literally would be a tube, not a beam.
+    actionState.channelGirth = beamRadius / BEAM_BASE_RADIUS;
 
     if (best) {
       const rampMult = 1 + ramp01 * ((stats.rampBonusPct ?? 0) / 100);

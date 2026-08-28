@@ -102,7 +102,8 @@ export function updateChannelBeam(
   active: boolean,
   from?: THREE.Vector3,
   to?: THREE.Vector3,
-  color?: number
+  color?: number,
+  girth = 1
 ): void {
   const mesh = ensureChannelMesh();
   if (!active || !from || !to) {
@@ -119,6 +120,8 @@ export function updateChannelBeam(
   mesh.visible = true;
   if (color !== undefined) (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
   mesh.position.copy(from).addScaledVector(channelDir, dist / 2);
-  mesh.scale.set(1, dist, 1);
+  // X/Z are the beam's cross-section, Y its length. `girth` lets an upgraded beam read as
+  // physically thicker (see actionState.channelGirth) rather than the widening being invisible.
+  mesh.scale.set(girth, dist, girth);
   mesh.quaternion.setFromUnitVectors(CHANNEL_UP, channelDir);
 }
