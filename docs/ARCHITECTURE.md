@@ -39,13 +39,15 @@ src/render/fx.ts            FROZEN   shared particle bursts + ground decal rings
 src/sim/castle.ts           [world-castle]      walls, HP, sockets, worldHeight, build/repair API,
                                                  blocksProjectile (battlement collision, see below)
 src/render/world.ts         [world-castle]      terrain, sky, lighting, environment props
-src/render/castleView.ts    [world-castle]      wall/socket meshes, damage states, rubble
+src/render/castleView.ts    [world-castle]      wall/socket meshes + socket-state markers, damage states, rubble
 
 src/sim/enemies.ts          [enemies-waves]     enemy defs registry, AI, combat
 src/sim/waves.ts            [enemies-waves]     wave scheduler, endless scaling
 src/data/enemies.ts         [enemies-waves]     enemy balance data
 src/data/waves.ts           [enemies-waves]     wave 1-10 definitions
 src/render/enemyView.ts     [enemies-waves]     instanced enemy meshes, health bars
+src/sim/damageEvents.ts     [enemies-waves]     sim->render damage-event queue (DoT bucketing)
+src/render/floatingText.ts  [ability-fx]        pooled floating combat-text sprites
 
 src/player/controller.ts    [player-classes]    pointer lock, WASD, worldHeight collision
 src/player/casting.ts       [player-classes]    aim raycast, ground-target reticle, cast commands

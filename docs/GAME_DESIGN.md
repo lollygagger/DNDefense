@@ -45,6 +45,17 @@ World axes: **X** = lateral (along walls), **Z** = depth (enemies approach from 
 
 Player installs/upgrades by looking at a socket within ~6m and pressing **E** (contextual menu).
 
+**Socket state is always readable at a distance.** Every socket carries a permanent marker, so you never have to remember where you put something or walk the whole wall to find it:
+
+| Socket state | Marker |
+| --- | --- |
+| Empty | The existing glowing plot marker — cyan slit on the wall face (embrasure), gold ground ring in the courtyard (chamber) |
+| Built, an upgrade you can afford | Gold beacon (ring + stem + gem) that slowly spins and bobs |
+| Built, an upgrade you can't afford yet | The same beacon, dim gold and still |
+| Built, tree finished | Dim green beacon, still — present, but deliberately not asking for attention |
+
+During the **build phase** beacons draw *through* walls and buildings, so one look around shows every structure you own and which ones will take your gold — including those on a wall you're standing behind. The instant combat starts they revert to normal occlusion so they can never hide an enemy. The **[E]** prompt spells out the same state in words (`— upgrades available`, `(320g)` when short, or `— fully upgraded`).
+
 **Expansion sockets (late-game gold sink, Phase 2 roadmap).** Each wall can purchase up to 2 more embrasure sockets (x = ±16 — the next crenel gap out from the base ±12 pair) and 2 more chamber sockets (x = ±9.5, in the ground-level gap between the base chamber and embrasure sockets) through that wall's upgrade tree (**B** menu → wall → Fortify → Expand the Wall). Each side is bought independently (west before east on each kind) at escalating cost (320g/500g for embrasures, 420g/650g for chambers), so a fully expanded wall tops out at 9 sockets — a firm, finite cap, not an infinite turret farm. New sockets get permanently unique ids continuing each kind's existing sequence (embrasure indices 3, 4; chamber indices 2, 3), so they never collide with, or invalidate, an already-installed structure's socket reference.
 
 ### Wall upgrades (per-wall tree, B menu)
@@ -96,6 +107,14 @@ severe enough to nearly immobilise), a milder **slow**, a **mark** (taking incre
 fixed priority (hard CC first, ground-zone burn last), so a wave of 80 enemies stays readable
 instead of becoming a wall of symbols. Glyphs are silhouette-distinct, not merely colour-coded, so
 they survive colourblindness and distance.
+
+**Damage numbers** float off each enemy as it's hit, so you can tell a glancing hit from a real
+one without reading health bars. A hit on a **marked** target renders hotter and larger, making the
+mark's payoff visible rather than theoretical, and a **killing blow** always renders on its own at
+full size. Continuous damage (bleeds, burns, standing in a zone) is the readability risk here — at
+60 ticks a second across a wave of 80 enemies it would be a wall of ones — so rapid repeat hits on
+the same enemy accumulate and surface as a **single periodic number** instead of one per tick.
+Concurrent floaters are capped, and overflow is dropped rather than queued.
 
 Ground effects follow a **visual language keyed to function, not to which ability made them**:
 damage zones glow warm and pulse steadily, slow zones glow cool and pulse gently, anything that
