@@ -156,7 +156,7 @@ const ABILITY_ANIM: Record<string, AbilityAnim> = {
   soulSiphon: gesture({}, 0.1),
   curseOfAgony: gesture({ z: -0.12, rx: -0.28, ry: 0.1 }, 0.35),
   abyssalGrasp: gesture({ ry: -0.3, rz: -0.14, z: -0.08 }, 0.45),
-  voidstep: gesture({ scale: -0.85, z: 0.1 }, 0.3),
+  umbralFlight: gesture({ scale: -0.85, z: 0.1 }, 0.3),
 };
 
 // NOTE ON METALNESS: this scene has no environment map, so a high-metalness MeshStandardMaterial

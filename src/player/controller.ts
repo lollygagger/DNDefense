@@ -49,6 +49,8 @@ const MOUSE_SENS = 0.0022; // rad per px
 const PITCH_LIMIT = (85 * Math.PI) / 180;
 const JUMP_SPEED = 4.5;
 const GRAVITY = 14;
+const FLY_ASCEND_SPEED = 6.5; // units/s while Space is held during flight
+const FLY_TAKEOFF_S = 0.4; // auto-ascend window at the start of a flight, so activating it lifts off
 const STEP_UP = 0.6; // max walkable rise; taller = obstacle (wall sides)
 const SNAP_DOWN = 0.5; // stick to ground walking down ramps
 const SKIN = 0.35; // horizontal probe padding so the camera doesn't clip into wall faces
@@ -214,6 +216,28 @@ export function pullPlayer(
   pullHook?.(targetX, targetY, targetZ, speed, timeout, onArrive);
 }
 
+let flyHook: ((duration: number, ceiling: number, onEnd?: () => void) => void) | null = null;
+
+/** Suspend gravity for `duration` seconds: the player hovers, keeps full WASD control at normal
+ *  move speed, and rises while Space is held, up to an absolute world-Y `ceiling`.
+ *
+ *  The fourth movement shape, alongside launch/pull/dash — and the only one that hands control
+ *  back to the player for its whole duration instead of playing out a fixed trajectory. That is
+ *  the point of it: it exists so the Warlock can pick a spot above a horde and stay there,
+ *  channelling, rather than being flung to a destination.
+ *
+ *  Bounded on purpose. The ceiling is absolute (not relative to the ground underfoot), so taking
+ *  off from a wall top can't stack altitude on top of the wall's own height; the ground clamp
+ *  still applies underneath, so flight can't sink through terrain; and the playfield clamp and
+ *  horizontal wall collision run exactly as they do while walking, so flying can't leave the map
+ *  or phase through a wall — only over one. There is deliberately no descend key: flight simply
+ *  ends and normal gravity takes the player down, which is what keeps it a committed window
+ *  rather than free-form hovering. `onEnd` fires exactly once, for any reason including death or
+ *  another movement override taking over. */
+export function flyPlayer(duration: number, ceiling: number, onEnd?: () => void): void {
+  flyHook?.(duration, ceiling, onEnd);
+}
+
 let moveSpeedMultHook: ((mult: number) => void) | null = null;
 
 /** Scale the player's normal WASD move speed by `mult` (1 = no change) until changed again.
@@ -243,6 +267,7 @@ export function initPlayer(game: GameState): void {
     // was on before teleporting — see the module doc comment.
     climbing = false;
     if (dashing) endDash();
+    if (flying) endFly();
   };
   moveSpeedMultHook = (mult) => {
     moveSpeedMult = mult;
@@ -259,6 +284,15 @@ export function initPlayer(game: GameState): void {
   let launchVX = 0;
   let launchVZ = 0;
   let launchOnLand: (() => void) | null = null;
+
+  // --- Flight state: gravity suspended for a fixed window, horizontal input untouched. The
+  // takeoff timer auto-ascends for the first moment so activating it visibly lifts you off the
+  // ground instead of leaving you standing there until you happen to press Space. ---
+  let flying = false;
+  let flyLeft = 0;
+  let flyCeiling = 0;
+  let flyTakeoffLeft = 0;
+  let flyOnEnd: (() => void) | null = null;
 
   // --- Grapple (pull) state: overrides movement + gravity entirely until arrival/timeout. ---
   let pulling = false;
@@ -290,6 +324,18 @@ export function initPlayer(game: GameState): void {
     cb?.();
   }
 
+  function endFly(): void {
+    if (!flying) return;
+    flying = false;
+    // Left airborne with zero vertical speed: the normal gravity path below takes over from here
+    // and the player falls from wherever they were, landing through the usual ground clamp.
+    vy = 0;
+    grounded = false;
+    const cb = flyOnEnd;
+    flyOnEnd = null;
+    cb?.();
+  }
+
   function endLaunch(): void {
     launching = false;
     const cb = launchOnLand;
@@ -315,6 +361,7 @@ export function initPlayer(game: GameState): void {
   }
 
   dashHook = (dirX, dirZ, speed, duration, onEnd) => {
+    if (flying) endFly();
     if (pulling) endPull();
     if (climbing) endClimb(false);
     if (launching) endLaunch();
@@ -327,7 +374,23 @@ export function initPlayer(game: GameState): void {
     dashOnEnd = onEnd ?? null;
   };
 
+  flyHook = (duration, ceiling, onEnd) => {
+    if (dashing) endDash();
+    if (pulling) endPull();
+    if (launching) endLaunch();
+    if (climbing) endClimb(false); // let go of the ladder; flight takes over from here
+    if (flying) endFly(); // finalize a flight already running before starting another
+    flying = true;
+    flyLeft = duration;
+    flyCeiling = ceiling;
+    flyTakeoffLeft = FLY_TAKEOFF_S;
+    flyOnEnd = onEnd ?? null;
+    vy = 0;
+    grounded = false;
+  };
+
   launchHook = (dirX, dirZ, hSpeed, vSpeed, onLand) => {
+    if (flying) endFly(); // a launch supersedes flight
     if (dashing) endDash(); // a launch supersedes a dash
     if (pulling) endPull(); // the two overrides can't coexist — finalize whichever was running
     if (climbing) endClimb(false); // let go and fall from here; the leap's own vy takes over below
@@ -341,6 +404,7 @@ export function initPlayer(game: GameState): void {
   };
 
   pullHook = (tx, ty, tz, speed, timeout, onArrive) => {
+    if (flying) endFly();
     if (launching) endLaunch();
     if (climbing) endClimb(false); // let go; the pull's own straight-line lerp takes over below
     pulling = true;
@@ -464,6 +528,10 @@ export function initPlayer(game: GameState): void {
     if (e.code === 'Space') {
       e.preventDefault();
       if (!e.repeat) jumpQueued = true;
+      // Also tracked as a held key: a jump is an edge (jumpQueued, consumed once per tick), but
+      // flight needs to know Space is *still down* to keep climbing. keyup's held.delete covers
+      // the release for any code, so nothing further is needed to clear it.
+      held.add(e.code);
     }
     if (MOVE_KEYS.has(e.code)) {
       // Arrows scroll the page / move focus by default; the game owns them while playing.
@@ -483,7 +551,7 @@ export function initPlayer(game: GameState): void {
    *  otherwise reuses every bit of this function — horizontal step-up collision, the playfield
    *  clamp, and the vertical gravity/ground-collision integration — so a leap can never land
    *  outside clampToPlayfield's box or tunnel through a wall it didn't have the height to clear. */
-  function applyMove(p: PlayerState, forward: number, strafe: number, jump: boolean, dt: number): void {
+  function applyMove(p: PlayerState, forward: number, strafe: number, jump: boolean, ascend: boolean, dt: number): void {
     if (!p.alive) {
       // Dead: frozen where they died until classes.ts respawns them at the keep. A leap in
       // flight when death happens (e.g. an arrow mid-air) is cancelled outright, not resolved —
@@ -491,6 +559,7 @@ export function initPlayer(game: GameState): void {
       // likewise abandoned outright rather than resolved to top/bottom — same "no sensible
       // resolution once dead" reasoning.
       if (launching) endLaunch();
+      if (flying) endFly(); // dead men don't hover — fall from here like any other airborne death
       climbing = false;
       vy = 0;
       grounded = true;
@@ -582,6 +651,28 @@ export function initPlayer(game: GameState): void {
       return;
     }
 
+    // Flight: gravity is skipped entirely for the duration. Space (or the opening takeoff window)
+    // climbs toward the ceiling; otherwise altitude simply holds, which is what makes hovering
+    // over a horde to channel practical. The ground clamp still applies underneath, so flying
+    // into rising terrain pushes you up rather than through it.
+    if (flying) {
+      flyLeft -= dt;
+      flyTakeoffLeft -= dt;
+      if (ascend || flyTakeoffLeft > 0) {
+        p.pos.y = Math.min(p.pos.y + FLY_ASCEND_SPEED * dt, flyCeiling);
+      }
+      const groundY = castle.worldHeight(p.pos.x, p.pos.z);
+      if (p.pos.y < groundY) p.pos.y = groundY;
+      vy = 0;
+      grounded = false;
+      playerMotion.velX = mx;
+      playerMotion.velZ = mz;
+      playerMotion.velY = 0;
+      playerMotion.grounded = false;
+      if (flyLeft <= 0) endFly();
+      return;
+    }
+
     // Vertical: jump, gravity, ground clamp (walkable heights come from the castle sim). A leap
     // never double-jumps off Space and always ends with the normal landing path below, so
     // onLand fires the tick the feet actually touch down — never on a timer.
@@ -626,14 +717,16 @@ export function initPlayer(game: GameState): void {
       let forward = 0;
       let strafe = 0;
       let jump = false;
+      let ascend = false;
       if (canMove) {
         const anyHeld = (codes: string[]): number => (codes.some((c) => held.has(c)) ? 1 : 0);
         forward = anyHeld(MOVE_FORWARD) - anyHeld(MOVE_BACK);
         strafe = anyHeld(MOVE_RIGHT) - anyHeld(MOVE_LEFT);
         jump = jumpQueued;
+        ascend = held.has('Space'); // sustained, unlike jump — see the keydown handler
       }
       jumpQueued = false;
-      applyMove(p, forward, strafe, jump, dt);
+      applyMove(p, forward, strafe, jump, ascend, dt);
     },
     render() {
       const p = game.localPlayer;

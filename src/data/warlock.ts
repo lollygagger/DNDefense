@@ -2,11 +2,11 @@ import { Vector3 } from 'three';
 import type { GameState } from '../sim/GameState';
 import type { Enemy, PlayerClassDef, PlayerState } from '../sim/types';
 import type { AbilityWithTree } from '../sim/abilityTree';
-import { clampToPlayfield, resetFall } from '../player/controller';
+import { flyPlayer } from '../player/controller';
 import { actionState } from '../player/actionState';
 import { applyStun } from '../sim/status';
 import { applyVulnerability, spawnGroundEffect, vulnerabilityMultiplier } from '../sim/abilityEffects';
-import { abyssalGraspTree, curseOfAgonyTree, soulSiphonTree, voidstepTree } from './warlockTree';
+import { abyssalGraspTree, curseOfAgonyTree, soulSiphonTree, umbralFlightTree } from './warlockTree';
 
 /** Warlock class definition. Owned by [player-classes]. Balance per docs/GAME_DESIGN.md.
  *  Identity: a second caster, but sustained and committed where the Mage is burst artillery —
@@ -16,8 +16,9 @@ import { abyssalGraspTree, curseOfAgonyTree, soulSiphonTree, voidstepTree } from
  *  the shot, or you let go) resets the ramp, so the whole kit rewards standing your ground and
  *  punishes constantly repositioning — the opposite tension from the Mage's poke-and-move bolt.
  *  Curse of Agony and Abyssal Grasp both exist to protect that commitment (a debuff that pays
- *  off the beam, a rift that roots a target still), and Voidstep is the escape valve when
- *  commitment stops paying off. cast() implementations are sim-side only: hitscan + state, no
+ *  off the beam, a rift that roots a target still), and Umbral Flight resolves the tension a
+ *  different way again: rather than an escape valve, it buys a position a melee horde simply
+ *  cannot reach, so the commitment can continue instead of being abandoned. cast() implementations are sim-side only: hitscan + state, no
  *  rendering — the beam's cover-check reaches game.castle through the same narrow local
  *  interface + cast that sim/projectiles.ts uses (see docs/ARCHITECTURE.md), never through the
  *  frozen CastleApi. Every ability also carries a late-game "Mastery" tree (data/warlockTree.ts)
@@ -244,92 +245,77 @@ const abyssalGrasp: AbilityWithTree = {
   },
 };
 
-/** Mobility: a short instant teleport, the same physical shape as the Mage's Blink (per
- *  docs/GAME_DESIGN.md's mobility note, reusing one of the three sanctioned shapes is expected —
- *  distinctiveness comes from the kit around it, not from inventing new movement code). Shorter
- *  base range than Blink and a longer cooldown, since the Warlock leans on standing its ground
- *  and channelling rather than constant repositioning; its Mastery branch can trade that back for
- *  either a banked second charge or an aggressive arrival nova, same shape as Blink's own tree. */
-const VOIDSTEP_COOLDOWN = 14;
-const voidCharges = new WeakMap<PlayerState, { charges: number; lastRegenAt: number }>();
+/** Mobility: a short window of actual FLIGHT — gravity off, full movement control, rising while
+ *  Space is held. This is the one mobility ability in the game that isn't a fixed trajectory
+ *  (see player/controller.ts's flyPlayer, the fourth movement shape alongside teleport/launch/
+ *  pull), and the kit is why: every other class repositions to somewhere and resumes fighting,
+ *  whereas the Warlock's whole identity is standing still and channelling. Flight lets it pick
+ *  the one position a melee horde can't answer — directly above them — and hold it for the few
+ *  seconds Soul Siphon needs to ramp. The horde is the terrain the Warlock plays around.
+ *
+ *  Deliberately a committed window, not an escape: an absolute ceiling (so taking off from a wall
+ *  top can't stack height), no descend control, and a long cooldown. When it ends you fall, which
+ *  means every cast is a decision about where you want to be standing four seconds from now.
+ *  Ranks buy duration only — the fantasy scales by getting longer, not by flying higher. */
+const UMBRAL_FLIGHT_COOLDOWN = 16;
 
-const voidstep: AbilityWithTree = {
-  id: 'voidstep',
-  name: 'Voidstep',
-  desc: 'Tear a short path through the void and step out the other side — even straight onto a wall top.',
-  icon: '🕳️',
-  targeting: 'ground',
-  cooldown: VOIDSTEP_COOLDOWN,
-  castRange: 22,
+const umbralFlight: AbilityWithTree = {
+  id: 'umbralFlight',
+  name: 'Umbral Flight',
+  desc: 'Unfurl wings of shadow and leave the ground behind. Hold Space to climb, drift freely while it lasts, and channel on the horde from somewhere their blades will never reach. When it ends, you fall.',
+  icon: '🦇',
+  targeting: 'aimed',
+  cooldown: UMBRAL_FLIGHT_COOLDOWN,
+  // No castRange: it's documented as the max GROUND-target distance, and this is a self-cast that
+  // ignores its aim point entirely (directional/instant, like the Warrior's Leap).
   role: 'mobility',
   ranks: [
-    { cost: 0, stats: { range: 16 } },
-    { cost: 40, stats: { range: 18 } },
-    { cost: 80, stats: { range: 20 } },
-    { cost: 140, stats: { range: 22 } },
+    { cost: 0, stats: { duration: 3.2, ceiling: 11 } },
+    { cost: 40, stats: { duration: 3.9, ceiling: 11 } },
+    { cost: 80, stats: { duration: 4.6, ceiling: 12 } },
+    { cost: 140, stats: { duration: 5.4, ceiling: 12 } },
   ],
-  tree: voidstepTree,
-  cast(game: GameState, caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
-    const { x, z } = clampToPlayfield(game, aimPoint.x, aimPoint.z);
-    const y = game.castle.worldHeight(x, z);
-    const departure = caster.pos.clone();
+  tree: umbralFlightTree,
+  cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {
+    // Directional/instant like the Warrior's Leap: no reticle, no aim point — pressing the key
+    // takes off from wherever you stand.
+    game.projectiles.impacts.push({ pos: caster.pos.clone(), kind: 'umbralFlight', aoe: false });
 
-    game.projectiles.impacts.push({ pos: departure, kind: 'voidstep', aoe: false });
-    caster.pos.set(x, y, z);
-    resetFall();
-    game.projectiles.impacts.push({ pos: caster.pos.clone(), kind: 'voidstep', aoe: false });
-
-    if (stats.collapseDamage) {
-      // Void Collapse/Implosion: the void erupts where you ARRIVE (not where you left, unlike
-      // Mage's Arcane Rebound) — an aggressive re-engage instead of a defensive parting shot.
-      const r2 = stats.collapseRadius * stats.collapseRadius;
+    if (stats.downdraftDamage) {
+      // Dread Takeoff: the downdraft as you launch hammers everything beneath you and drags it
+      // inward. The point isn't the damage — it's that the horde ends up clumped directly under
+      // the spot you're about to hover over, which is exactly the shape Soul Siphon wants.
+      const r2 = stats.downdraftRadius * stats.downdraftRadius;
       for (const e of game.enemies) {
         if (!e.alive) continue;
         const dx = e.pos.x - caster.pos.x;
         const dz = e.pos.z - caster.pos.z;
         const d2 = dx * dx + dz * dz;
         if (d2 > r2) continue;
-        e.takeDamage(stats.collapseDamage, game);
+        e.takeDamage(stats.downdraftDamage, game);
         const dist = Math.sqrt(d2);
-        if (dist > 0.05 && stats.collapsePull) {
-          const pull = Math.min(stats.collapsePull, dist);
+        if (dist > 0.05 && stats.downdraftPull) {
+          const pull = Math.min(stats.downdraftPull, dist);
           const s = pull / dist;
           e.pos.x -= dx * s;
           e.pos.z -= dz * s;
         }
       }
-      game.projectiles.impacts.push({ pos: caster.pos.clone(), kind: 'grasp', aoe: true, radius: stats.collapseRadius });
+      game.projectiles.impacts.push({ pos: caster.pos.clone(), kind: 'grasp', aoe: true, radius: stats.downdraftRadius });
     }
 
-    const maxCharges = Math.round(stats.charges ?? 1);
-    if (maxCharges > 1) {
-      // Echoing/Doubled Step: identical banked-charge mechanism to Mage's Blink Cascade — see
-      // mage.ts's blink cast() for the reasoning behind refunding the just-set cooldown instead
-      // of granting a parallel one.
-      const now = game.time;
-      let cs = voidCharges.get(caster);
-      if (!cs) cs = { charges: maxCharges, lastRegenAt: now };
-      const regenInterval = VOIDSTEP_COOLDOWN / maxCharges;
-      const regened = Math.floor((now - cs.lastRegenAt) / regenInterval);
-      if (regened > 0) {
-        cs.charges = Math.min(maxCharges, cs.charges + regened);
-        cs.lastRegenAt += regened * regenInterval;
-      }
-      if (cs.charges > 0) {
-        cs.charges -= 1;
-        caster.cooldowns['voidstep'] = now;
-      }
-      voidCharges.set(caster, cs);
-    }
+    flyPlayer(stats.duration, stats.ceiling, () => {
+      game.projectiles.impacts.push({ pos: caster.pos.clone(), kind: 'umbralFlight', aoe: false });
+    });
   },
 };
 
 export const WARLOCK: PlayerClassDef = {
   id: 'warlock',
   name: 'Warlock',
-  desc: 'Channeler of forbidden power: a sustained beam that hits harder the longer it stays locked on, backed by curses, binding chains, and a step through the void.',
+  desc: 'Channeler of forbidden power: a sustained beam that hits harder the longer it stays locked on, backed by curses, binding chains, and wings of shadow.',
   maxHp: 100,
   moveSpeed: 6,
   primary: soulSiphon,
-  abilities: [curseOfAgony, abyssalGrasp, voidstep],
+  abilities: [curseOfAgony, abyssalGrasp, umbralFlight],
 };

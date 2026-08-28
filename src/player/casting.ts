@@ -42,7 +42,7 @@ const RETICLE_COLORS: Record<string, number> = {
   shieldSlam: 0xffd23f, // tank: shield-boss amber
   curseOfAgony: 0xd63fe0, // warlock: sickly curse violet
   abyssalGrasp: 0x7a3fe0, // warlock: void-rift indigo
-  voidstep: 0x9a2fb0, // warlock: void-step magenta
+  umbralFlight: 0x9a2fb0, // warlock: umbral-flight magenta
 };
 const RETICLE_DEFAULT_COLOR = 0xd6c9ff;
 const FLASH_COLOR = 0xff3344;

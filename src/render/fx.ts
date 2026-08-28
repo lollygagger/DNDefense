@@ -492,9 +492,9 @@ const IMPACT_EFFECTS: Record<string, ImpactFn> = {
     spawnBurst(imp.pos, 0x9a5cff, 20, 7, 0.35, { upMin: 0.15, upMax: 0.7, converge: true, size: 0.3 });
     spawnRing(imp.pos, radius, 0x7a3fe0, 0.3);
   },
-  // Voidstep: the same implode-on-departure/explode-on-arrival read as Blink, in the Warlock's
-  // magenta-void hue so it never gets mistaken for the Mage's own teleport at a glance.
-  voidstep: (imp) => {
+  // Umbral Flight: a burst of void as the wings unfurl on takeoff, and again when flight
+  // ends and the Warlock drops. Magenta-void hue, distinct from the Mage's teleport at a glance.
+  umbralFlight: (imp) => {
     spawnBurst(imp.pos, 0x9a2fb0, 16, 6, 0.3, { upMin: 0.2, upMax: 0.9, converge: true, size: 0.3 });
     spawnRing(imp.pos, 1.4, 0xc23bff, 0.25);
   },
