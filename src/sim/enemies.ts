@@ -4,6 +4,8 @@ import { allocId, type Enemy, type EnemyDef, type Unit, type Wall } from './type
 import { ENEMY_AI, getEnemyDef, isFlyerDef } from '../data/enemies';
 import { ENEMY_SPAWN_Z, FIELD_MAX_X, FIELD_MIN_X, WALL_HALF_WIDTH } from '../data/castle';
 import { isStunned, moveMultiplier } from './status';
+import { isVulnerable } from './abilityEffects';
+import { recordEnemyDamage } from './damageEvents';
 import { stepFlyer } from './flyers';
 
 /** Owned by [enemies-waves]. Enemy spawning + AI.
@@ -62,8 +64,17 @@ export function spawnEnemy(game: GameState, defId: string, mods?: SpawnMods): En
     yaw: 0,
     takeDamage(amount: number, g: GameState): void {
       if (!e.alive) return;
+      // ability-clarity task (2026-08-27): record every hit for floating combat text before
+      // mutating hp, using the isVulnerable status read from sim/abilityEffects.ts — this is
+      // what lets a marked (Curse of Agony etc.) enemy's numbers visibly run hotter/bigger than
+      // an unmarked one's, without this closure needing to know which ability caused the hit.
+      // See sim/damageEvents.ts for how the single call below fans out into hit/dot/kill
+      // categories and stays bounded under an 80-enemy load.
+      const amplified = isVulnerable(e, g);
       e.hp -= amount;
-      if (e.hp > 0) return;
+      const dying = e.hp <= 0;
+      recordEnemyDamage(g, e.id, e.pos.x, e.pos.y + e.height * 0.85, e.pos.z, amount, amplified, dying);
+      if (!dying) return;
       e.hp = 0;
       e.alive = false;
       g.kills++;

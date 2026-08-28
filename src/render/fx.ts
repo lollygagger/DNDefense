@@ -3,6 +3,7 @@ import type { GameState } from '../sim/GameState';
 import type { Impact } from '../sim/projectiles';
 import { R } from './scene';
 import { spawnBeam, updateBeams } from './aerialBeam';
+import { initFloatingText } from './floatingText';
 
 /** Owned by [ability-fx] (was FROZEN). Reads sim state, never mutates it. Instanced projectile
  *  rendering (by `kind`), particle bursts, expanding rings, lingering ground fields, and (via
@@ -536,6 +537,13 @@ function makeInstanced(geo: THREE.BufferGeometry, mat: THREE.Material): THREE.In
 }
 
 export function initFx(game: GameState): void {
+  // Floating combat text (damage-legibility task, 2026-08-27) is its own module
+  // (render/floatingText.ts) but is wired up from here rather than main.ts (FROZEN boot order,
+  // no spare hook for a new render system) — initFx is already the place that turns sim combat
+  // events into on-screen feedback, so a second small system registered from inside it is a
+  // natural, main.ts-untouched way to add one.
+  initFloatingText(game);
+
   // Instanced projectile rendering, one main mesh + optional glow mesh per kind, lazily built.
   const kindMeshes = new Map<string, THREE.InstancedMesh>();
   const glowMeshes = new Map<string, THREE.InstancedMesh>();
