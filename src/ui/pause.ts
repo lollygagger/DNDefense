@@ -98,6 +98,11 @@ export function initPause(game: GameState): void {
     if (document.pointerLockElement === null) open();
   });
 
+  // ORDERING MATTERS: this listens on `document` while ui/menus.ts's Esc handler listens on
+  // `window`, so this runs first (document is earlier in the bubble path). That's deliberate —
+  // when Esc closes an open menu, this handler sees the overlay still registered and open()'s
+  // anyOverlayOpen() guard declines, leaving menus.ts to close it. Move this to `window` and Esc
+  // would close the menu and then immediately open the pause screen behind it.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (paused) resume();

@@ -49,6 +49,22 @@ export function initMenus(game: GameState): void {
 
   // ---------- open/close ----------
 
+  /** Last HTML actually written to the DOM, so an unchanged live refresh can be skipped entirely
+   *  — see renderMenu(). Cleared on close so reopening always rebuilds. */
+  let lastHtml: string | null = null;
+
+  /** True between pointerdown and pointerup anywhere on the page. The live refresh is held off
+   *  while it's set: replacing root.innerHTML mid-press destroys the element the user pressed
+   *  down on, and the browser then fires no `click` at all (a click requires down and up to land
+   *  on the same element), so the press is silently swallowed. That was the "I had to click the
+   *  ✕ three times" bug — a 250ms refresh cadence against a ~100ms click eats a large share of
+   *  them, at random. */
+  let pressActive = false;
+  document.addEventListener('pointerdown', () => { pressActive = true; }, true);
+  document.addEventListener('pointerup', () => { pressActive = false; }, true);
+  document.addEventListener('pointercancel', () => { pressActive = false; }, true);
+  addEventListener('blur', () => { pressActive = false; });
+
   function close(): void {
     if (open === null) return;
     open = null;
@@ -56,7 +72,18 @@ export function initMenus(game: GameState): void {
     castleWallFocus = null;
     root.style.display = 'none';
     root.innerHTML = '';
+    lastHtml = null;
     overlayClosed('menu');
+    // Take the mouse back from within the gesture that closed the menu (the ✕ click, or Esc), so
+    // play resumes immediately instead of needing another click on the world. Best-effort: it
+    // legitimately rejects when close() came from a render-driven auto-close rather than a user
+    // gesture, or inside the browser's brief cooldown after an Esc-initiated unlock — in both
+    // cases the canvas click handler in player/controller.ts is still there as the way back in.
+    if (anyOverlayOpen()) return; // something else (the pause screen) owns the pointer now
+    if (game.phase !== 'build' && game.phase !== 'combat') return;
+    const canvas = document.querySelector('canvas');
+    const ret = canvas?.requestPointerLock() as unknown;
+    (ret as Promise<void> | undefined)?.catch(() => {});
   }
 
   function toggle(id: MenuId): void {
@@ -78,6 +105,11 @@ export function initMenus(game: GameState): void {
 
   function renderMenu(): void {
     if (open === null) return;
+    // Guarded here rather than only at the throttled call site below, because the event-driven
+    // refreshes (gold:changed fires on every kill) reach this function directly and would
+    // otherwise still be able to destroy a button mid-press. Whatever is skipped here is picked
+    // up by the next throttled refresh once the button comes back up.
+    if (pressActive) return;
     let html: string | null;
     if (open === 'socket') html = renderSocketMenu();
     else if (open === 'castle') html = renderCastleMenu();
@@ -86,12 +118,19 @@ export function initMenus(game: GameState): void {
       close();
       return;
     }
+    // Nothing rendered differently, so leave the DOM completely alone. The live refresh exists
+    // for values that move during combat (wall HP bars, affordability as gold comes in); in the
+    // build phase — where nearly all menu clicking happens — nothing changes between actions, so
+    // this turns the 250ms rebuild into a no-op instead of a quarter-second window in which a
+    // press can be destroyed mid-click. Cheap string compare against a DOM subtree rebuild.
+    if (html === lastHtml) return;
+
     // Preserve the body's scroll offset across the throttled live re-render. This rebuilds the
-    // whole subtree every MENU_REFRESH_S to refresh HP bars and affordability, which destroys the
-    // scrolled element — without this, scrolling a tall menu (the castle Fortify screen) snaps
-    // straight back to the top a quarter-second later and the panel is effectively unusable.
+    // whole subtree, which destroys the scrolled element — without this, scrolling a tall menu
+    // (the castle Fortify screen) snaps straight back to the top and the panel is unusable.
     const prevScroll = root.querySelector<HTMLElement>('.menu-body')?.scrollTop ?? 0;
     root.innerHTML = html;
+    lastHtml = html;
     if (prevScroll > 0) {
       const body = root.querySelector<HTMLElement>('.menu-body');
       if (body) body.scrollTop = prevScroll; // clamps itself if the content got shorter
@@ -302,7 +341,10 @@ export function initMenus(game: GameState): void {
       const inGame = game.phase === 'build' || game.phase === 'combat';
 
       // throttled live refresh of the open menu (wall HP bars during combat etc.)
-      if (open !== null) {
+      // renderMenu() enforces the press guard itself; repeating it here keeps lastRefresh from
+      // advancing while a press defers the refresh, so the update lands on the first frame after
+      // the button comes back up rather than waiting another full cadence.
+      if (open !== null && !pressActive) {
         const now = performance.now() / 1000;
         if (now - lastRefresh > MENU_REFRESH_S) {
           lastRefresh = now;

@@ -142,6 +142,13 @@ spacing choice that breaks the "12 divides evenly" alignment.
 - Game phases: `menu → build ⇄ combat → gameover`. Phase changes only via `GameState.setPhase()`.
 - Keep files under ~400 lines; split rather than grow.
 - `npm run check` (tsc --noEmit) must pass before you finish any task.
+- **Never rebuild live UI out from under a press.** A DOM `click` fires only when the mousedown
+  and the mouseup land on the same element, so replacing a panel's `innerHTML` between them
+  destroys the pressed button and the click is silently swallowed — no error, no event, the user
+  just sees a dead button. `ui/menus.ts` refreshes on a 250ms cadence *and* on `gold:changed`, so
+  it guards both: it skips the write entirely when the rendered HTML is unchanged, and defers any
+  rebuild while a pointer is down (see its `pressActive`). Any future panel that re-renders itself
+  while visible needs the same two guards.
 
 
 ## Playground mode (`src/ui/playground.ts`)
