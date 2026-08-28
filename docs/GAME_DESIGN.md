@@ -49,10 +49,12 @@ Player installs/upgrades by looking at a socket within ~6m and pressing **E** (c
 
 | Socket state | Marker |
 | --- | --- |
-| Empty | The existing glowing plot marker — cyan slit on the wall face (embrasure), gold ground ring in the courtyard (chamber) |
+| Empty | Cyan plot marker — a glowing slit on the wall face (embrasure) or a ground ring in the courtyard (chamber) |
 | Built, an upgrade you can afford | Gold beacon (ring + stem + gem) that slowly spins and bobs |
 | Built, an upgrade you can't afford yet | The same beacon, dim gold and still |
 | Built, tree finished | Dim green beacon, still — present, but deliberately not asking for attention |
+
+One hue means one thing across both socket kinds: **cyan** = nothing here yet, **gold** = spend gold here, **green** = done.
 
 During the **build phase** beacons draw *through* walls and buildings, so one look around shows every structure you own and which ones will take your gold — including those on a wall you're standing behind. The instant combat starts they revert to normal occlusion so they can never hide an enemy. The **[E]** prompt spells out the same state in words (`— upgrades available`, `(320g)` when short, or `— fully upgraded`).
 

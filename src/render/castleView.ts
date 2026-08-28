@@ -205,11 +205,18 @@ export function initCastleView(game: GameState): void {
   const rubbleMat = new THREE.MeshLambertMaterial({ flatShading: true });
   const doorMat = new THREE.MeshLambertMaterial({ color: 0x2e2620 });
   const slitFrameMat = new THREE.MeshBasicMaterial({ color: 0x1c1f26 });
+  // Socket colour language, one meaning per hue across BOTH socket kinds: cyan = empty plot,
+  // gold = built with an upgrade waiting, green = built and finished (the beacon materials
+  // below). The chamber ring used to be gold, which collided with the "spend gold here" beacon
+  // — an empty plot and an upgradeable turret are different prompts and shouldn't share a
+  // colour. Embrasure and chamber empties now match; they're already told apart by shape and
+  // placement (slit in the wall face vs ground ring in the courtyard). The two keep their
+  // offset pulse phases so they don't throb in lockstep.
   const embGlowMat = new THREE.MeshBasicMaterial({
     color: 0x59d8ff, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide,
   });
   const chamberGlowMat = new THREE.MeshBasicMaterial({
-    color: 0xffc94d, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide,
+    color: 0x59d8ff, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide,
   });
   // Three shared beacon materials rather than one per socket: the state a beacon is in is
   // swapped by reassigning .material (updateSocketBeacon), so the pulse below animates every
