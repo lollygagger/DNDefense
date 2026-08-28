@@ -209,6 +209,26 @@ values (see `Impact.radius`/`duration`), because players position around what th
 - **Umbral Flight** (key 4, 16s cd, instant self mobility): actual flight. Gravity switches off for 3.2 → 5.4s (40/80/140g); you keep full movement control, hold **Space** to climb to an absolute ceiling of 11 → 12, and drift wherever you like until it ends — then you fall. No damage. The only mobility ability in the game that isn't a fixed trajectory, and the kit is why: every other class repositions *to* somewhere and resumes fighting, while the Warlock's whole identity is standing still and channelling. Flight buys the one position a melee horde cannot answer — directly above it — for exactly as long as Soul Siphon needs to ramp. Deliberately a committed window rather than an escape: the ceiling is absolute (taking off from a wall top can't stack on the wall's own height), there is no descend control, and it can pass *over* a wall but never through one — horizontal collision applies exactly as it does on foot, so flying into a wall below its parapet still stops you dead.
   **Mastery** (600g/1600g, pick one): *Endless Wings → Wings of the Abyss* — 7.4s → 9.6s aloft and a higher ceiling (13 → 15); long enough to cross the field above the horde, draining the whole way. *Dread Takeoff → Maelstrom Ascent* — the downdraft as you launch deals 60 → 110 dmg and drags everything within 4.5 → 6 units inward, so the horde is bunched directly beneath the spot you are about to hover over. The damage is the smaller half of that; the clustering is the point, since it hands Soul Siphon and Curse of Agony the shape they both want.
 
+**Ranged attackers hold a wall-relative firing line, not a defender-relative one.** A ranged
+enemy advances to a fixed standoff from the *wall* — its actual objective — and shoots from there.
+It deliberately does **not** stop as soon as some defender enters its own range, because measuring
+the standoff from the nearest defender makes it unanswerable by construction: it would park a full
+bow-range beyond the frontmost ally, and since every other rank stands *behind* that ally, the
+whole army ends up out of range at once. Melee never acquires (their aggro is measured from their
+post, which is further back still) and the archers meant to answer can't reach. The result is a
+line that stands and dies to an attacker it is not allowed to fight.
+
+With a wall-relative line, an enemy archer lands inside the defending army's engagement envelope
+whatever the army happens to be made of. Concretely, against the keep: enemy archers stop ~17 from
+the ally archer rank, comfortably inside its 20 reach, and inside the aggro range of every melee
+rank.
+
+**Ranged answers ranged.** Melee still can't *reach* an enemy archer — they acquire it and press
+to their chase limit, but `ALLY_CHASE_FORWARD` deliberately keeps them from abandoning the line to
+run one down (that unbounded chase is what used to fragment the army into scattered duels). Enemy
+archers are your archers' problem, and the player's. Melee holding while the ranged ranks trade is
+the intended shape of the fight, not a gap in it.
+
 ## Structures
 
 Ally stats/behavior are data-driven (`src/data/allies.ts`'s `AllyDef`: melee / ranged / caster /
@@ -383,7 +403,7 @@ the other four spawners' either/or shape:
 |---|---|---|---|---|
 | Goblin Grunt | 30 | 4.5 | Fast melee swarm. 8 dmg vs units, 5 DPS vs walls. Prefers nearby allies over walls. | 6 |
 | Orc Bruiser | 140 | 2.2 | Slow tank, wall-breaker. 20 dmg melee, 20 DPS vs walls. | 15 |
-| Skeleton Archer | 45 | 3.2 | Stops at 22 range, shoots exposed units/structures/player (7 dmg / 2.2s), else plinks walls. Arrows are stopped by merlons — using cover meaningfully cuts incoming damage. | 10 |
+| Skeleton Archer | 45 | 3.2 | Advances to a firing line 20 out from the wall (range 22 less a 2-unit standback), then shoots exposed units/structures/player (7 dmg / 2.2s) from there, else plinks walls. Arrows are stopped by merlons — using cover meaningfully cuts incoming damage. | 10 |
 | Orc Warlord (wave 10 boss) | 1200 | 1.8 | Huge. 40 dmg melee, 60 DPS vs walls. | 200 |
 | Hot Air Balloon (flying, wave 6+) | 320 | 1.3 | Slow, tanky siege bomber. Cruises at altitude 10, always above the merlon line, drops a bomb every 3.5s: 26 dmg AoE (r4) to any defender caught in the blast, plus a 45 flat burst to whatever wall it's currently over. Never dodges, never blocked by battlements — the only counter is DPS. | 45 |
 | Dragon (flying, wave 9+) | 260 | 7.5 | Fast, dangerous breath-strafer. Cruises at 9.5, dives to 6.5 once per second in sync with its breath tick (12 dmg AoE r3 to anyone under it, plus a 10 flat wall-HP burst), then patrols side to side once it reaches the keep. The dive height is genuinely blockable by merlons (unlike the balloon) — standing still under its pass is the losing move; reposition instead. | 55 |

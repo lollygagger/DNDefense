@@ -11,8 +11,11 @@ import { stepFlyer } from './flyers';
 /** Owned by [enemies-waves]. Enemy spawning + AI.
  *  - Melee/boss: march down their spawn lane toward the outermost intact wall and batter it;
  *    divert to nearby field-level defender units (allies sortieing out).
- *  - Ranged: advance until a defender unit is in bow range and shoot it (arrows arc up to
- *    walls; projectiles ignore walls — accepted v1); with nothing to shoot, chip the wall.
+ *  - Ranged: advance to a firing line a fixed standoff from the WALL, then shoot whatever
+ *    defender is in bow range from there (arrows arc up to walls; projectiles ignore walls —
+ *    accepted v1); with nothing to shoot, chip the wall. The standoff is deliberately measured
+ *    from the wall rather than from the nearest defender — see stepRanged's standZ for why
+ *    the latter made ranged attackers unanswerable by the entire defending army.
  *  - Flyers (isFlyerDef, any defId in data/enemies.ts's FLYER_AI — hot air balloon, dragon):
  *    ignore walls and the above entirely, dispatched to sim/flyers.ts's stepFlyer() instead.
  *    See that file's header for the full flight/attack model and design rationale.
@@ -226,9 +229,22 @@ function stepRanged(
     }
   }
 
+  // The firing line: how far back a ranged attacker is willing to stand. Measured from the WALL,
+  // its actual objective — never from whichever defender happens to be closest.
+  //
+  // This clamp is the whole reason ranged enemies are answerable. Without it, an archer stopped
+  // the instant ANY defender came within its own 22-unit range, and since it measures that from
+  // the frontmost ally (the tank line, 8.5 out from the wall) it parked ~30 from the wall. Every
+  // defending rank sits behind that tank: swordsman posts ended up 24.5 away against an aggro
+  // range of 24, ally archers 27.5 away against a reach of 20. So the entire army was out of
+  // range by construction — melee stood and took arrows without ever acquiring, and the archers
+  // who were supposed to answer could not. Holding the same standoff in both branches means a
+  // ranged attacker always closes into the defending line's engagement envelope.
+  const standZ = wall ? Math.min(barrierZ, wall.z - e.def.range + ENEMY_AI.archerStandback) : -Infinity;
+
   if (target) {
     faceToward(e, target.pos);
-    if (bestD <= e.def.range) {
+    if (bestD <= e.def.range && e.pos.z >= standZ - 0.05) {
       shootArrow(e, target, vels.get(target.id), game);
       return;
     }
@@ -242,7 +258,6 @@ function stepRanged(
   }
 
   if (!wall) return;
-  const standZ = Math.min(barrierZ, wall.z - e.def.range + ENEMY_AI.archerStandback);
   if (e.pos.z < standZ - 0.05) {
     moveToward(e, laneSlotX(e), standZ, speed, dt);
   } else {
