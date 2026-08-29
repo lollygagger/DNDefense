@@ -302,7 +302,7 @@ const UMBRAL_FLIGHT_COOLDOWN = 16;
 const umbralFlight: AbilityWithTree = {
   id: 'umbralFlight',
   name: 'Umbral Flight',
-  desc: 'Unfurl wings of shadow and leave the ground behind. Hold Space to climb and Shift to drop, drift freely while it lasts, and channel on the horde from somewhere their blades will never reach. When it ends, you fall.',
+  desc: 'Unfurl wings of shadow and leave the ground behind. Hold Space to climb and Shift to drop, glide a quarter faster than you run, and channel on the horde from somewhere their blades will never reach. When it ends, you fall.',
   icon: '🦇',
   targeting: 'aimed',
   cooldown: UMBRAL_FLIGHT_COOLDOWN,

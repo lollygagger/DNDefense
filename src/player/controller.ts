@@ -56,6 +56,13 @@ const FLY_ASCEND_SPEED = 6.5; // units/s while Space is held during flight
 const FLY_DESCEND_KEYS = ['ShiftLeft', 'ShiftRight'];
 const FLY_DESCEND_SPEED = 7; // units/s while Shift is held — a touch faster than the climb, so
 // dropping back into the fight feels decisive without being a free fall (gravity is 14).
+/** Horizontal speed multiplier while flying. Flight is a short, expensive window, and at walking
+ *  pace a big part of it was spent just getting somewhere; gliding should cover ground. Applied
+ *  on top of moveSpeedMult rather than replacing it, so effects that slow you still land — most
+ *  importantly Soul Siphon's own 0.6 channel penalty, which combines to 0.75 rather than being
+ *  cancelled. Flying and channelling at once is the ability's whole purpose, and it should still
+ *  cost you mobility to do it. */
+const FLY_SPEED_MULT = 1.25;
 const FLY_TAKEOFF_S = 0.4; // auto-ascend window at the start of a flight, so activating it lifts off
 const STEP_UP = 0.6; // max walkable rise; taller = obstacle (wall sides)
 const SNAP_DOWN = 0.5; // stick to ground walking down ramps
@@ -605,7 +612,7 @@ export function initPlayer(game: GameState): void {
       mx = launchVX;
       mz = launchVZ;
     } else {
-      const speed = p.classDef.moveSpeed * moveSpeedMult;
+      const speed = p.classDef.moveSpeed * moveSpeedMult * (flying ? FLY_SPEED_MULT : 1);
       const sinY = Math.sin(p.yaw);
       const cosY = Math.cos(p.yaw);
       // camera basis on the ground plane: forward = (-sin yaw, -cos yaw), right = (cos yaw, -sin yaw)
