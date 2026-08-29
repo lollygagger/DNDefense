@@ -293,15 +293,16 @@ const abyssalGrasp: AbilityWithTree = {
  *  seconds Soul Siphon needs to ramp. The horde is the terrain the Warlock plays around.
  *
  *  Deliberately a committed window, not an escape: an absolute ceiling (so taking off from a wall
- *  top can't stack height), no descend control, and a long cooldown. When it ends you fall, which
- *  means every cast is a decision about where you want to be standing four seconds from now.
+ *  top can't stack height) and a long cooldown. Space climbs and Shift drops — full vertical
+ *  control — but the window itself is fixed, so descending early spends the remaining time rather
+ *  than saving it. Every cast is still a decision about where you want to be a few seconds from now.
  *  Ranks buy duration only — the fantasy scales by getting longer, not by flying higher. */
 const UMBRAL_FLIGHT_COOLDOWN = 16;
 
 const umbralFlight: AbilityWithTree = {
   id: 'umbralFlight',
   name: 'Umbral Flight',
-  desc: 'Unfurl wings of shadow and leave the ground behind. Hold Space to climb, drift freely while it lasts, and channel on the horde from somewhere their blades will never reach. When it ends, you fall.',
+  desc: 'Unfurl wings of shadow and leave the ground behind. Hold Space to climb and Shift to drop, drift freely while it lasts, and channel on the horde from somewhere their blades will never reach. When it ends, you fall.',
   icon: '🦇',
   targeting: 'aimed',
   cooldown: UMBRAL_FLIGHT_COOLDOWN,

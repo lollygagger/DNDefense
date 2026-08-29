@@ -50,6 +50,12 @@ const PITCH_LIMIT = (85 * Math.PI) / 180;
 const JUMP_SPEED = 4.5;
 const GRAVITY = 14;
 const FLY_ASCEND_SPEED = 6.5; // units/s while Space is held during flight
+// Descend is Shift, deliberately NOT Ctrl: Ctrl held together with the movement keys fires
+// browser shortcuts (Ctrl+W closes the tab, Ctrl+S saves, Ctrl+A selects all), and flying while
+// steering with WASD is exactly when that combination would happen. Shift has no such bindings.
+const FLY_DESCEND_KEYS = ['ShiftLeft', 'ShiftRight'];
+const FLY_DESCEND_SPEED = 7; // units/s while Shift is held — a touch faster than the climb, so
+// dropping back into the fight feels decisive without being a free fall (gravity is 14).
 const FLY_TAKEOFF_S = 0.4; // auto-ascend window at the start of a flight, so activating it lifts off
 const STEP_UP = 0.6; // max walkable rise; taller = obstacle (wall sides)
 const SNAP_DOWN = 0.5; // stick to ground walking down ramps
@@ -230,10 +236,10 @@ let flyHook: ((duration: number, ceiling: number, onEnd?: () => void) => void) |
  *  off from a wall top can't stack altitude on top of the wall's own height; the ground clamp
  *  still applies underneath, so flight can't sink through terrain; and the playfield clamp and
  *  horizontal wall collision run exactly as they do while walking, so flying can't leave the map
- *  or phase through a wall — only over one. There is deliberately no descend key: flight simply
- *  ends and normal gravity takes the player down, which is what keeps it a committed window
- *  rather than free-form hovering. `onEnd` fires exactly once, for any reason including death or
- *  another movement override taking over. */
+ *  or phase through a wall — only over one. Shift descends (see FLY_DESCEND_KEYS); the flight
+ *  window itself is still fixed, so coming down early costs you the remaining time rather than
+ *  banking it. `onEnd` fires exactly once, for any reason including death or another movement
+ *  override taking over. */
 export function flyPlayer(duration: number, ceiling: number, onEnd?: () => void): void {
   flyHook?.(duration, ceiling, onEnd);
 }
@@ -538,6 +544,9 @@ export function initPlayer(game: GameState): void {
       e.preventDefault();
       held.add(e.code);
     }
+    // Descend while flying. Not preventDefault'd — Shift alone does nothing in a browser, and
+    // swallowing it would break the modifier for anything else that wants it.
+    if (FLY_DESCEND_KEYS.includes(e.code)) held.add(e.code);
   });
   document.addEventListener('keyup', (e) => held.delete(e.code));
   addEventListener('blur', () => held.clear());
@@ -551,7 +560,15 @@ export function initPlayer(game: GameState): void {
    *  otherwise reuses every bit of this function — horizontal step-up collision, the playfield
    *  clamp, and the vertical gravity/ground-collision integration — so a leap can never land
    *  outside clampToPlayfield's box or tunnel through a wall it didn't have the height to clear. */
-  function applyMove(p: PlayerState, forward: number, strafe: number, jump: boolean, ascend: boolean, dt: number): void {
+  function applyMove(
+    p: PlayerState,
+    forward: number,
+    strafe: number,
+    jump: boolean,
+    ascend: boolean,
+    descend: boolean,
+    dt: number
+  ): void {
     if (!p.alive) {
       // Dead: frozen where they died until classes.ts respawns them at the keep. A leap in
       // flight when death happens (e.g. an arrow mid-air) is cancelled outright, not resolved —
@@ -658,10 +675,17 @@ export function initPlayer(game: GameState): void {
     if (flying) {
       flyLeft -= dt;
       flyTakeoffLeft -= dt;
-      if (ascend || flyTakeoffLeft > 0) {
+      // Space climbs, Shift drops, neither holds altitude. Holding descend also cancels the
+      // opening takeoff lift, so a player who wants to stay low from the moment they cast isn't
+      // fighting their own launch for the first fraction of a second.
+      if (ascend || (flyTakeoffLeft > 0 && !descend)) {
         p.pos.y = Math.min(p.pos.y + FLY_ASCEND_SPEED * dt, flyCeiling);
+      } else if (descend) {
+        p.pos.y -= FLY_DESCEND_SPEED * dt;
       }
       const groundY = castle.worldHeight(p.pos.x, p.pos.z);
+      // Descending never drops you through the world; the same walkable-height clamp that stops
+      // a walking player applies here, so you settle onto ground/wall tops and can climb again.
       if (p.pos.y < groundY) p.pos.y = groundY;
       vy = 0;
       grounded = false;
@@ -718,15 +742,17 @@ export function initPlayer(game: GameState): void {
       let strafe = 0;
       let jump = false;
       let ascend = false;
+      let descend = false;
       if (canMove) {
         const anyHeld = (codes: string[]): number => (codes.some((c) => held.has(c)) ? 1 : 0);
         forward = anyHeld(MOVE_FORWARD) - anyHeld(MOVE_BACK);
         strafe = anyHeld(MOVE_RIGHT) - anyHeld(MOVE_LEFT);
         jump = jumpQueued;
         ascend = held.has('Space'); // sustained, unlike jump — see the keydown handler
+        descend = FLY_DESCEND_KEYS.some((c) => held.has(c));
       }
       jumpQueued = false;
-      applyMove(p, forward, strafe, jump, ascend, dt);
+      applyMove(p, forward, strafe, jump, ascend, descend, dt);
     },
     render() {
       const p = game.localPlayer;
