@@ -62,6 +62,8 @@ interface ChannelLock {
   lastTickAt: number;
 }
 const channelLocks = new WeakMap<PlayerState, ChannelLock>();
+/** Reused per tick so a 6-unit-wide beam sweeping a column doesn't allocate every 0.15s. */
+const beamHits: { e: Enemy; t: number }[] = [];
 
 const soulSiphon: AbilityWithTree = {
   id: 'soulSiphon',
@@ -91,6 +93,18 @@ const soulSiphon: AbilityWithTree = {
     // locks the single nearest one, by design), it makes the lock you already have much harder to
     // lose, which is where a maxed channel's damage actually comes from.
     { cost: 220, stats: { dps: 118, lifestealPct: 35, beamRadius: 2.2, range: 30 } },
+    // Ranks VI-X (deep late game): the beam stops being a single-target lock and becomes a
+    // sweeping torrent. It simply gets WIDER — 2.2 to 8.5 — and burns everything the cylinder
+    // covers for full damage, so how many enemies it catches is just how wide it has grown. At
+    // 8.5 it washes over most of a column's frontage at once, and lifesteal counts every point of
+    // it, which is what lets a maxed Warlock stand in front of a formation and hold. The ramp
+    // still tracks the NEAREST target only (see cast): the lock is the ability's identity, and
+    // widening never makes the ramp easier to hold, just more profitable while you do.
+    { cost: 350, stats: { dps: 155, beamRadius: 3.2 } },
+    { cost: 600, stats: { dps: 205, beamRadius: 4.2 } },
+    { cost: 1000, stats: { dps: 270, beamRadius: 5.4, range: 34 } },
+    { cost: 1700, stats: { dps: 360, beamRadius: 6.8 } },
+    { cost: 2800, stats: { dps: 480, beamRadius: 8.5, range: 38 } },
   ],
   tree: soulSiphonTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -108,8 +122,10 @@ const soulSiphon: AbilityWithTree = {
       maxDist = origin.distanceTo(hitScratch);
     }
 
-    let best: Enemy | null = null;
-    let bestT = Infinity;
+    // Everything the beam is currently washing over, nearest first. At rank I the radius is 1.3
+    // and this is effectively the original single-target scan; the deep ranks widen it to 8.5 and
+    // it becomes a torrent that burns a whole file of a column at once.
+    beamHits.length = 0;
     for (const e of game.enemies) {
       if (!e.alive) continue;
       const toE = e.pos.clone().sub(origin);
@@ -118,11 +134,15 @@ const soulSiphon: AbilityWithTree = {
       const perpSq = toE.lengthSq() - t * t;
       const rr = beamRadius + e.radius;
       if (perpSq > rr * rr) continue;
-      if (t < bestT) {
-        bestT = t;
-        best = e;
-      }
+      beamHits.push({ e, t });
     }
+    beamHits.sort((a, b) => a.t - b.t);
+    // No target cap: the beam burns everything it physically covers, so how many enemies it
+    // catches is simply how wide it has grown. The nearest hit is the PRIMARY — it alone drives
+    // the target lock and the ramp, so widening never makes the ramp easier to hold, it just
+    // catches more in it while you do.
+    const best: Enemy | null = beamHits.length > 0 ? beamHits[0].e : null;
+    const bestT = beamHits.length > 0 ? beamHits[0].t : Infinity;
 
     // Target lock + ramp: see ChannelLock's doc comment for why a stale gap resets it, not just
     // a changed target.
@@ -174,12 +194,23 @@ const soulSiphon: AbilityWithTree = {
 
     if (best) {
       const rampMult = 1 + ramp01 * ((stats.rampBonusPct ?? 0) / 100);
-      const dmg = stats.dps * stats.tickInterval * rampMult * vulnerabilityMultiplier(best, game);
-      best.takeDamage(dmg, game);
+      const perTick = stats.dps * stats.tickInterval * rampMult;
+      // Every caught enemy burns for full damage, not a falloff — a torrent doesn't get gentler
+      // further along it. Vulnerability is still resolved per target, since a marked enemy in the
+      // beam should take more than an unmarked one beside it.
+      let dealt = 0;
+      for (const hit of beamHits) {
+        const dmg = perTick * vulnerabilityMultiplier(hit.e, game);
+        hit.e.takeDamage(dmg, game);
+        dealt += dmg;
+      }
+      const dmg = perTick * vulnerabilityMultiplier(best, game); // primary's share, for residue below
 
       const lifestealPct = stats.lifestealPct ?? 0;
       if (lifestealPct > 0 && (stats.lifestealAlways || ramp01 >= 1)) {
-        caster.hp = Math.min(caster.maxHp, caster.hp + dmg * (lifestealPct / 100));
+        // Drains from everything it touches. Clamped by maxHp, so a wide beam means "you stay
+        // topped up while you hold a crowd", not unbounded healing.
+        caster.hp = Math.min(caster.maxHp, caster.hp + dealt * (lifestealPct / 100));
       }
       if (stats.residueDps && ramp01 >= 1) {
         // Withering/Blighted Beam: a lingering burn at the target's current position, using the

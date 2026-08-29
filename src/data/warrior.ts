@@ -46,6 +46,16 @@ const cleave: AbilityWithTree = {
     // Pure damage, no CC, and still the fastest cooldown in the game (0.35s) — safe to make
     // omnidirectional because it was never a control ability.
     { cost: 220, stats: { damage: 58, range: 5.5, arcDeg: 360 } },
+    // Ranks VI-X (deep late game): Whirlwind stops being a swing and becomes a weather system.
+    // The arc is already 360 from rank V, so all these buy is REACH and weight — a maxed Cleave
+    // sweeps a 14-unit circle for 520 a hit on a 0.35s cooldown, which is the whole late-game
+    // Warrior fantasy: wade into a column and delete it. It stays pure damage with no CC, and it
+    // is still melee — you have to be standing in the middle of the thing you are erasing.
+    { cost: 350, stats: { damage: 90, range: 7 } },
+    { cost: 600, stats: { damage: 140, range: 8.5 } },
+    { cost: 1000, stats: { damage: 220, range: 10 } },
+    { cost: 1700, stats: { damage: 340, range: 12 } },
+    { cost: 2800, stats: { damage: 520, range: 14 } },
   ],
   tree: cleaveTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {

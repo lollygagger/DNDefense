@@ -69,6 +69,16 @@ const shieldBash: AbilityWithTree = {
     { cost: 40, stats: { damage: 15, range: 3.3 } },
     { cost: 80, stats: { damage: 21, range: 3.6 } },
     { cost: 140, stats: { damage: 28, range: 3.9 } },
+    // Ranks V-X: the Tank's basic attack was the only primary that stopped at four ranks, which
+    // is exactly why it felt like a chip-damage button forever. It now scales like the rest —
+    // still the shortest reach of the melee primaries, since its job is holding ground rather
+    // than clearing it, but no longer irrelevant once the waves get big.
+    { cost: 220, stats: { damage: 38, range: 4.2, arcDeg: 90 } },
+    { cost: 350, stats: { damage: 54, range: 4.6 } },
+    { cost: 600, stats: { damage: 78, range: 5 } },
+    { cost: 1000, stats: { damage: 112, range: 5.5 } },
+    { cost: 1700, stats: { damage: 162, range: 6, arcDeg: 120 } },
+    { cost: 2800, stats: { damage: 235, range: 6.5 } },
   ],
   tree: shieldBashTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
