@@ -126,12 +126,34 @@ const soulSiphon: AbilityWithTree = {
 
     // Target lock + ramp: see ChannelLock's doc comment for why a stale gap resets it, not just
     // a changed target.
+    //
+    // A KILL CARRIES THE RAMP; ABANDONING A LIVE TARGET DOES NOT. Resetting on every target change
+    // made the ramp self-defeating at the ranks that matter: rank V's 118 dps kills anything weak
+    // in well under the 3s ramp time, so chewing through a swarm reset progress on every kill and
+    // the ramp never completed. That silently disabled rank V's own lifesteal, which is gated on a
+    // full ramp — the rank's damage half cancelling its lifesteal half. Measured before this fix:
+    // 20s of channelling, 27 kills, zero healing.
+    //
+    // So the beam stays hot when its target dies and it rolls straight onto the next one — you
+    // were channelling the whole time, you just succeeded. Swinging the beam onto a different
+    // *living* enemy is still a voluntary abandonment and still resets, which is what keeps the
+    // "commit to one target" identity the whole kit is built around.
     const hitId = best?.id ?? null;
     const staleGap = stats.tickInterval * 2.5;
-    let lock = channelLocks.get(caster);
-    if (!lock || lock.targetId !== hitId || game.time - lock.lastTickAt > staleGap) {
+    const prior = channelLocks.get(caster);
+    let lock: ChannelLock;
+    if (!prior || game.time - prior.lastTickAt > staleGap) {
       lock = { targetId: hitId, rampStart: game.time, lastTickAt: game.time };
+    } else if (prior.targetId !== hitId) {
+      const prev = prior.targetId === null ? null : game.enemies.find((e) => e.id === prior.targetId);
+      const priorTargetDied = prior.targetId !== null && (!prev || !prev.alive);
+      lock = {
+        targetId: hitId,
+        rampStart: priorTargetDied ? prior.rampStart : game.time,
+        lastTickAt: game.time,
+      };
     } else {
+      lock = prior;
       lock.lastTickAt = game.time;
     }
     channelLocks.set(caster, lock);
