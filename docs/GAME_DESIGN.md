@@ -96,14 +96,26 @@ Generic, data-driven class framework. A class = `PlayerClassDef`: max HP, move s
 ### Deep ranks (VI–X): the late-game power curve
 
 Every class's **primary attack** carries ten linear ranks, not five. Ranks I–V are the early
-ladder (40/80/140/220g, each with a behaviour unlock at V); **VI–X cost 350 / 600 / 1000 / 1700 /
-2800g** and are exactly what the name suggests — the same basic upgrade, just more expensive each
-time. They exist because past wave 30 the enemy curve keeps climbing (bigger columns, elite
+ladder (40/80/140/220g, each with a behaviour unlock at V); **VI–X cost 600 / 1500 / 3500 / 7500 /
+16000g** and are exactly what the name suggests — the same basic upgrade, just far more expensive
+each time. They exist because past wave 30 the enemy curve keeps climbing (bigger columns, elite
 champions, a skirmisher stream) while the player's did not, so a run that was going well stopped
 feeling powerful and started feeling like attrition.
 
 The primary is the right place for this: it's the button you hold constantly, so scaling it is
 felt immediately, and it needs no new mechanics to teach.
+
+**The costs are steep on purpose.** A maxed primary can carry a wave more or less single-handed —
+a rank-X Soul Siphon clears wave 35 about as fast as it spawns — so the price has to be a real
+commitment rather than a formality. Maxing one primary costs **29,580g** end to end, and rank X
+alone is ~1.9 waves of *perfect* income at wave 35 (measured: a flawless wave-35 clear yields
+~8,300g) with nothing spent on walls, repairs or structures.
+
+Note that income is not smooth: it swings with which late-game template a wave rotates onto —
+~8,300g on a wave-9-style swarm versus ~27,000g on a wave-10-style one carrying several Orc
+Warlords at 200g each. And because `ENDLESS.goldGrowth` scales income while these costs are fixed,
+rank X stops being a serious purchase somewhere past wave 40. Scaling the ladder with the wave (or
+finding a deeper sink) is the obvious next step if the endgame economy ever needs one.
 
 | Class | Primary | Rank V → Rank X |
 |---|---|---|

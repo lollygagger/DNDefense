@@ -59,11 +59,11 @@ const quickshot: AbilityWithTree = {
     { cost: 220, stats: { damage: 30, autoFire: 1 } },
     // Ranks VI-X: full-auto stays, the per-shot damage climbs hard. Sustained rate is already
     // ~3.3x from autoFire, so these ranks compound with it rather than adding another mechanic.
-    { cost: 350, stats: { damage: 44 } },
-    { cost: 600, stats: { damage: 64 } },
-    { cost: 1000, stats: { damage: 92 } },
-    { cost: 1700, stats: { damage: 132 } },
-    { cost: 2800, stats: { damage: 190 } },
+    { cost: 600, stats: { damage: 44 } },
+    { cost: 1500, stats: { damage: 64 } },
+    { cost: 3500, stats: { damage: 92 } },
+    { cost: 7500, stats: { damage: 132 } },
+    { cost: 16000, stats: { damage: 190 } },
   ],
   tree: quickshotTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {

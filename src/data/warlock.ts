@@ -100,11 +100,11 @@ const soulSiphon: AbilityWithTree = {
     // it, which is what lets a maxed Warlock stand in front of a formation and hold. The ramp
     // still tracks the NEAREST target only (see cast): the lock is the ability's identity, and
     // widening never makes the ramp easier to hold, just more profitable while you do.
-    { cost: 350, stats: { dps: 155, beamRadius: 3.2 } },
-    { cost: 600, stats: { dps: 205, beamRadius: 4.2 } },
-    { cost: 1000, stats: { dps: 270, beamRadius: 5.4, range: 34 } },
-    { cost: 1700, stats: { dps: 360, beamRadius: 6.8 } },
-    { cost: 2800, stats: { dps: 480, beamRadius: 8.5, range: 38 } },
+    { cost: 600, stats: { dps: 155, beamRadius: 3.2 } },
+    { cost: 1500, stats: { dps: 205, beamRadius: 4.2 } },
+    { cost: 3500, stats: { dps: 270, beamRadius: 5.4, range: 34 } },
+    { cost: 7500, stats: { dps: 360, beamRadius: 6.8 } },
+    { cost: 16000, stats: { dps: 480, beamRadius: 8.5, range: 38 } },
   ],
   tree: soulSiphonTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {

@@ -74,11 +74,11 @@ const shieldBash: AbilityWithTree = {
     // still the shortest reach of the melee primaries, since its job is holding ground rather
     // than clearing it, but no longer irrelevant once the waves get big.
     { cost: 220, stats: { damage: 38, range: 4.2, arcDeg: 90 } },
-    { cost: 350, stats: { damage: 54, range: 4.6 } },
-    { cost: 600, stats: { damage: 78, range: 5 } },
-    { cost: 1000, stats: { damage: 112, range: 5.5 } },
-    { cost: 1700, stats: { damage: 162, range: 6, arcDeg: 120 } },
-    { cost: 2800, stats: { damage: 235, range: 6.5 } },
+    { cost: 600, stats: { damage: 54, range: 4.6 } },
+    { cost: 1500, stats: { damage: 78, range: 5 } },
+    { cost: 3500, stats: { damage: 112, range: 5.5 } },
+    { cost: 7500, stats: { damage: 162, range: 6, arcDeg: 120 } },
+    { cost: 16000, stats: { damage: 235, range: 6.5 } },
   ],
   tree: shieldBashTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {

@@ -34,11 +34,11 @@ const arcaneBolt: AbilityWithTree = {
     { cost: 220, stats: { damage: 80, pierce: 1 } },
     // Ranks VI-X: the bolt keeps growing and keeps punching through more bodies, so a single
     // click eventually skewers most of a file rather than one enemy in it.
-    { cost: 350, stats: { damage: 110, pierce: 2 } },
-    { cost: 600, stats: { damage: 155, pierce: 3 } },
-    { cost: 1000, stats: { damage: 215, pierce: 4 } },
-    { cost: 1700, stats: { damage: 300, pierce: 5 } },
-    { cost: 2800, stats: { damage: 420, pierce: 8 } },
+    { cost: 600, stats: { damage: 110, pierce: 2 } },
+    { cost: 1500, stats: { damage: 155, pierce: 3 } },
+    { cost: 3500, stats: { damage: 215, pierce: 4 } },
+    { cost: 7500, stats: { damage: 300, pierce: 5 } },
+    { cost: 16000, stats: { damage: 420, pierce: 8 } },
   ],
   tree: arcaneBoltTree,
   cast(game: GameState, _caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {

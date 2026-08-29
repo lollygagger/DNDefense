@@ -51,11 +51,11 @@ const cleave: AbilityWithTree = {
     // sweeps a 14-unit circle for 520 a hit on a 0.35s cooldown, which is the whole late-game
     // Warrior fantasy: wade into a column and delete it. It stays pure damage with no CC, and it
     // is still melee — you have to be standing in the middle of the thing you are erasing.
-    { cost: 350, stats: { damage: 90, range: 7 } },
-    { cost: 600, stats: { damage: 140, range: 8.5 } },
-    { cost: 1000, stats: { damage: 220, range: 10 } },
-    { cost: 1700, stats: { damage: 340, range: 12 } },
-    { cost: 2800, stats: { damage: 520, range: 14 } },
+    { cost: 600, stats: { damage: 90, range: 7 } },
+    { cost: 1500, stats: { damage: 140, range: 8.5 } },
+    { cost: 3500, stats: { damage: 220, range: 10 } },
+    { cost: 7500, stats: { damage: 340, range: 12 } },
+    { cost: 16000, stats: { damage: 520, range: 14 } },
   ],
   tree: cleaveTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
