@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import type { GameState } from './GameState';
 import { allocId, type Enemy, type EnemyDef, type Unit, type Wall } from './types';
-import { ENEMY_AI, getEnemyDef, isFlyerDef } from '../data/enemies';
+import { ELITE, ENEMY_AI, getEnemyDef, isFlyerDef } from '../data/enemies';
 import { ENEMY_SPAWN_Z, FIELD_MAX_X, FIELD_MIN_X, WALL_HALF_WIDTH } from '../data/castle';
 import { isStunned, moveMultiplier } from './status';
 import { isVulnerable } from './abilityEffects';
@@ -36,6 +36,14 @@ export interface SimEnemy extends Enemy {
   laneX: number; // spawn x — kept as the marching lane / wall attack slot
   nextAttackAt: number; // game.time when the next unit-hit / arrow is allowed
   yaw: number; // facing (radians, atan2(dx, dz)); updated by movement
+  /** Elite multiplier on everything this enemy DEALS — its melee hit and its wall chipping (1 =
+   *  ordinary). Kept per-enemy rather than as a separate elite EnemyDef so an elite is genuinely
+   *  the same creature, just a far more dangerous one, and so any future enemy type can be
+   *  promoted without authoring a parallel def. See ELITE in data/enemies.ts. */
+  powerMult: number;
+  /** Render-only size tell for elites, read by render/enemyView.ts through a narrow cast. An
+   *  enemy that takes three times the killing has to look like it will. */
+  eliteScale: number;
 }
 
 /** An explicit slot in a marching formation, replacing the default random lane + spawn line.
@@ -54,7 +62,8 @@ export function spawnEnemy(
   game: GameState,
   defId: string,
   mods?: SpawnMods,
-  placement?: SpawnPlacement
+  placement?: SpawnPlacement,
+  elite = false
 ): Enemy | null {
   const def = getEnemyDef(defId);
   const hpMult = mods?.hpMult ?? 1;
@@ -84,6 +93,8 @@ export function spawnEnemy(
     // small stagger so simultaneous spawns don't attack/shoot in lockstep
     nextAttackAt: game.time + game.rng.range(0, def.attackInterval * 0.5),
     yaw: 0,
+    powerMult: elite ? ELITE.powerMult : 1,
+    eliteScale: elite ? ELITE.scale : 1,
     takeDamage(amount: number, g: GameState): void {
       if (!e.alive) return;
       // ability-clarity task (2026-08-27): record every hit for floating combat text before
@@ -160,7 +171,7 @@ function laneSlotX(e: SimEnemy): number {
 function tryHitUnit(e: SimEnemy, target: Unit, game: GameState): void {
   if (game.time < e.nextAttackAt) return;
   e.nextAttackAt = game.time + e.def.attackInterval;
-  target.takeDamage(e.def.unitDamage, game);
+  target.takeDamage(e.def.unitDamage * e.powerMult, game);
 }
 
 function shootArrow(e: SimEnemy, target: Unit, vel: TrackedVel | undefined, game: GameState): void {
@@ -222,7 +233,7 @@ function stepMelee(e: SimEnemy, dt: number, game: GameState, wall: Wall | null, 
     moveToward(e, laneSlotX(e), stopZ, speed, dt);
   } else {
     e.yaw = 0; // face the wall
-    game.castle.damageWall(wall.tier, e.def.wallDps * dt, game);
+    game.castle.damageWall(wall.tier, e.def.wallDps * e.powerMult * dt, game);
   }
 }
 
@@ -272,7 +283,7 @@ function stepRanged(
       return;
     }
     // pinned at the wall with the target still out of range — chip the wall instead
-    if (wall) game.castle.damageWall(wall.tier, e.def.wallDps * dt, game);
+    if (wall) game.castle.damageWall(wall.tier, e.def.wallDps * e.powerMult * dt, game);
     return;
   }
 
@@ -281,7 +292,7 @@ function stepRanged(
     moveToward(e, laneSlotX(e), standZ, speed, dt);
   } else {
     e.yaw = 0;
-    game.castle.damageWall(wall.tier, e.def.wallDps * dt, game);
+    game.castle.damageWall(wall.tier, e.def.wallDps * e.powerMult * dt, game);
   }
 }
 

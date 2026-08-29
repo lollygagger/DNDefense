@@ -495,8 +495,46 @@ the point of it — but `delay` still orders the roster, so a type an author hel
 a later column. **Flyers are exempt** and keep the original scattered, independent scheduling: they
 cross above the field, where a ground formation means nothing.
 
+Column gaps are jittered so an assault is never metronomic, and any gap after the first may
+instead collapse into a **double push** (30% chance): the next column arriving almost on the heels
+of the one before, two formations hitting the line together. That spike is what stops a defence
+that comfortably handles one column at a time from being sufficient forever, and it is random by
+design — you cannot learn the pattern, only build for the possibility.
+
 Endless waves scale the columns rather than multiplying them (they cap at 5), so late waves send
 bigger formations, not more of them — wave 20 fields five columns of 17.
+
+### Skirmishers: the siege that never lifts
+
+From **wave 10**, loose bands of raiders keep arriving in the gaps *between* the columns, so a
+wave is one continuous fight rather than a series of separate engagements with lulls in them.
+Columns are the shape of a wave; skirmishers are the pressure underneath it. They spawn the old
+scattered way — random lane, own speed, no rank — because they are stragglers, not an army, and
+that contrast is what makes an arriving column read as organised.
+
+Their rate ramps from one band every ~16s at wave 10 to one every ~4s by **wave 30**, where the
+trickle becomes a constant stream and the late game stops being "waves with gaps".
+
+**They arrive only while the wave is still delivering**, and never in the build phase. Once the
+last of the wave's spawns is out the trickle stops, so the tail of a wave is a fight you can
+actually finish, and they count toward the wave-clear like anything else — which is exactly what
+guarantees an empty field when the intermission arrives. The build phase is when you shop, and
+shopping under fire is a different game. Verified at wave 30: skirmishers arrive between the
+columns throughout the fight, then zero arrivals across 90s of the following build phase, with the
+field completely clear.
+
+### Elites: champions in the big waves
+
+Scaling count alone eventually stops being interesting — 60 goblins is not scarier than 40, just
+longer. So from **wave 12** a growing share of every column (and of the skirmisher bands) is
+promoted to **elite**: 3x hp, 1.8x damage on both its melee hit and its wall-chipping, 2.5x gold.
+The share ramps from 6% at wave 12 to 28% by wave 35, so a late formation carries genuine
+champions among ordinary troops rather than being uniformly spongy.
+
+Elites are seeded per body rather than by promoting whole ranks, and they are **visibly 1.35x
+larger** than their type — an enemy that takes three times the killing and hits nearly twice as
+hard has to look like it will. An elite is the same creature, not a separate enemy type, so any
+enemy added later can be promoted without authoring a parallel definition.
 
 | Wave | Composition (count × type, spawn interval) |
 |---|---|

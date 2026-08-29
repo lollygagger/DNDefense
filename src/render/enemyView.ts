@@ -352,6 +352,14 @@ export function initEnemyView(game: GameState): void {
         }
         rec.group.position.set(enemy.pos.x, y, enemy.pos.z);
 
+        // Elite tell: champions seeded into late waves (see ELITE in data/enemies.ts) stand
+        // visibly larger than their type. An enemy that takes three times the killing and hits
+        // nearly twice as hard has to look like it will, or the wave just feels arbitrarily
+        // spongy. Read through a narrow cast — `eliteScale` lives on sim/enemies.ts's SimEnemy,
+        // not on the FROZEN Enemy interface this loop is typed against.
+        const scale = (enemy as unknown as { eliteScale?: number }).eliteScale ?? 1;
+        if (rec.group.scale.x !== scale) rec.group.scale.setScalar(scale);
+
         // Ground shadow: the altitude cue. Shrinks and fades the higher the flyer is above the
         // ground directly beneath it, so a player can judge height at a glance.
         if (rec.shadow && rec.shadowMat) {

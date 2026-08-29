@@ -200,6 +200,13 @@ export const FORMATION = {
   minColumns: 2, // even a small wave arrives as two groups — "waves upon waves"
   maxColumns: 5,
   columnGap: 10, // seconds between successive columns setting off
+  columnGapJitter: 3, // +-this on each gap, so the rhythm of an assault is never metronomic
+  /** Chance that a column follows almost on the heels of the one before it instead of waiting a
+   *  full gap — two formations hitting the line at once. This is the spike that makes a defence
+   *  that comfortably handles one column at a time suddenly not enough, and it is deliberately
+   *  random: you cannot learn the pattern, only build for the possibility. */
+  doublePushChance: 0.3,
+  doublePushGap: 2,
   /** A column marches at its slowest member's speed times this, capped at its fastest member's.
    *  Pure slowest-member pace is the real-world rule but reads as a slog here: an orc column
    *  would take ~36s to cross the 80-unit approach, and it would drag every goblin down with it.
@@ -222,6 +229,45 @@ const FORMATION_RANK: Record<string, number> = {
 /** Rank for any enemy, falling back on its behaviour so a newly added type slots in sensibly
  *  without needing an entry above: anything that shoots belongs at the back, anything else in the
  *  melee body. Only override when a type needs to lead (a heavy) rather than fill in. */
+/** Skirmishers: the loose, unformed enemies that keep arriving BETWEEN the formed columns and
+ *  right through the build phase, so the field is never actually empty. Columns are the shape of a
+ *  wave; skirmishers are the pressure underneath it. They deliberately spawn the old scattered
+ *  way — random lane, own speed, no rank — because they are stragglers and raiders, not an army,
+ *  and that visual contrast is what makes an arriving column read as organised.
+ *
+ *  They arrive only while a wave is still delivering columns, so the build phase stays genuinely
+ *  clear — the intermission is when you shop, and shopping under fire is a different game. Once
+ *  the last column is out the trickle stops, the field is finished off, and the wave ends
+ *  normally. Their rate ramps from nothing at `startWave` to a constant stream by
+ *  `fullPressureWave`, which is what turns the late game from "waves with gaps" into one
+ *  continuous fight that only lets up once the wave is actually beaten. */
+export const SKIRMISH = {
+  startWave: 10, // below this the field really is empty between columns; the early game stays legible
+  fullPressureWave: 30, // by here the trickle is at full rate — "there are always enemies coming"
+  intervalStart: 16, // seconds between skirmisher arrivals at startWave
+  intervalFull: 4, // ...and at fullPressureWave and beyond
+  groupMin: 1,
+  groupMaxStart: 1,
+  groupMaxFull: 3, // small bands rather than single stragglers once the siege is properly on
+};
+
+/** Elites: individually much stronger versions of ordinary enemies, seeded into the columns of
+ *  late waves so a big formation carries genuine champions rather than just more bodies. Scaling
+ *  count alone eventually stops being interesting — 60 goblins is not scarier than 40, just
+ *  longer — so past `startWave` a growing share of each column hits far harder than its type
+ *  suggests. They are visibly larger (see render/enemyView.ts), because an enemy that takes three
+ *  times the killing has to look like it will. */
+export const ELITE = {
+  startWave: 12,
+  fullShareWave: 35,
+  shareStart: 0.06, // fraction of a column that is elite at startWave
+  shareFull: 0.28,
+  hpMult: 3,
+  powerMult: 1.8, // its melee hit and its wall-chipping both land this much harder
+  goldMult: 2.5, // worth killing, not just surviving
+  scale: 1.35, // render-only size tell
+};
+
 export function formationRank(defId: string): number {
   const explicit = FORMATION_RANK[defId];
   if (explicit !== undefined) return explicit;
