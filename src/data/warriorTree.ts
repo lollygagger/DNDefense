@@ -104,7 +104,7 @@ export const secondWindTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['fortitude1'],
-    stats: { heal: 100, dmgBuffPct: 20, dmgBuffDuration: 5 },
+    stats: { heal: 470, dmgBuffPct: 75, dmgBuffDuration: 9 },
   },
   {
     id: 'adrenaline2',
@@ -112,7 +112,7 @@ export const secondWindTree: AbilityTreeNode[] = [
     desc: 'Heals 150, +35% damage for 6s.',
     cost: T2,
     requires: 'adrenaline1',
-    stats: { heal: 150, dmgBuffPct: 35, dmgBuffDuration: 6 },
+    stats: { heal: 540, dmgBuffPct: 110, dmgBuffDuration: 11 },
   },
   {
     id: 'fortitude1',
@@ -121,7 +121,7 @@ export const secondWindTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['adrenaline1'],
-    stats: { heal: 100, reductionPct: 25, reductionDuration: 3 },
+    stats: { heal: 470, reductionPct: 70, reductionDuration: 10 },
   },
   {
     id: 'fortitude2',
@@ -129,7 +129,7 @@ export const secondWindTree: AbilityTreeNode[] = [
     desc: 'Heals 150, 35% damage reduction for 4s.',
     cost: T2,
     requires: 'fortitude1',
-    stats: { heal: 150, reductionPct: 35, reductionDuration: 4 },
+    stats: { heal: 540, reductionPct: 85, reductionDuration: 13 },
   },
 ];
 
@@ -141,7 +141,7 @@ export const leapTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['warLeap1'],
-    stats: { speed: 8.5, damage: 80, radius: 3.6, stunDuration: 1.0, knockback: 2.5 },
+    stats: { speed: 9, damage: 480, radius: 8.2, stunDuration: 2.4, knockback: 7 },
   },
   {
     id: 'rollingThunder2',
@@ -149,23 +149,25 @@ export const leapTree: AbilityTreeNode[] = [
     desc: '105 dmg, 1.3s stun, and a 3.5-unit knockback — clears breathing room around you on every landing.',
     cost: T2,
     requires: 'rollingThunder1',
-    stats: { speed: 9.0, damage: 105, radius: 4, stunDuration: 1.3, knockback: 3.5 },
+    stats: { speed: 9.4, damage: 580, radius: 9, stunDuration: 2.8, knockback: 10 },
   },
   {
     id: 'warLeap1',
+    overrides: ['stunDuration'], // trades the landing stun for the shorter cooldown
     name: 'War Leap',
     desc: 'Sheds the landing slam’s damage growth for a much shorter cooldown (40% of normal, ~2s) — a repeatable gap-closer for chaining leaps across the field instead of one big hit.',
     cost: T1,
     requires: null,
     excludes: ['rollingThunder1'],
-    stats: { speed: 7.0, damage: 35, radius: 2.8, stunDuration: 0, cooldownMult: 0.6 },
+    stats: { speed: 9, damage: 460, radius: 7.8, stunDuration: 0, cooldownMult: 0.45 },
   },
   {
     id: 'warLeap2',
+    overrides: ['stunDuration'],
     name: 'Restless War Leap',
     desc: 'Cooldown down to 25% of normal (~1.25s) — Leap becomes a movement tool you can use almost every other second.',
     cost: T2,
     requires: 'warLeap1',
-    stats: { speed: 7.5, damage: 35, radius: 2.8, stunDuration: 0, cooldownMult: 0.4 },
+    stats: { speed: 9.4, damage: 520, radius: 8.2, stunDuration: 0, cooldownMult: 0.3 },
   },
 ];

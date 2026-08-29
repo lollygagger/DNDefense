@@ -12,6 +12,7 @@ const [T1, T2] = TREE_TIER_COST;
 export const arcaneBoltTree: AbilityTreeNode[] = [
   {
     id: 'forkBolt1',
+    overrides: ['pierce'], // splitting genuinely gives up the pierce the deep ranks grant
     name: 'Fork Bolt',
     desc: 'Splits into 2 lighter bolts (45 dmg each) fired in a narrow spread instead of one — clears two separate targets standing near each other instead of piercing through a line.',
     cost: T1,
@@ -21,6 +22,7 @@ export const arcaneBoltTree: AbilityTreeNode[] = [
   },
   {
     id: 'forkBolt2',
+    overrides: ['pierce'],
     name: 'Arcane Fusillade',
     desc: 'Three bolts (55 dmg each) in a wider fan — up to 165 dmg spread across a whole cluster in one cast.',
     cost: T2,
@@ -29,6 +31,7 @@ export const arcaneBoltTree: AbilityTreeNode[] = [
   },
   {
     id: 'empoweredBolt1',
+    overrides: ['count', 'spreadDeg'], // this branch IS the single-bolt one; it must undo the volley
     name: 'Empowered Bolt',
     desc: 'Trades the pierce for a devastating single-target hit: 150 dmg and a 25% slow for 1.5s. The execute button for one tough target instead of a line of weak ones.',
     cost: T1,
@@ -91,7 +94,7 @@ export const frostFieldTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['killingFrost1'],
-    stats: { radius: 6.5, slowPct: 60, duration: 4, lingerSlowPct: 30, lingerDuration: 5 },
+    stats: { radius: 15.5, slowPct: 97, duration: 20, lingerSlowPct: 60, lingerDuration: 8 },
   },
   {
     id: 'permafrost2',
@@ -99,7 +102,7 @@ export const frostFieldTree: AbilityTreeNode[] = [
     desc: '65% slow for 5s, then a 45% lingering chill for 7 more seconds — the longest-lasting zone control in the game.',
     cost: T2,
     requires: 'permafrost1',
-    stats: { radius: 7.5, slowPct: 65, duration: 5, lingerSlowPct: 45, lingerDuration: 7 },
+    stats: { radius: 17.5, slowPct: 98, duration: 24, lingerSlowPct: 80, lingerDuration: 12 },
   },
   {
     id: 'killingFrost1',
@@ -108,7 +111,7 @@ export const frostFieldTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['permafrost1'],
-    stats: { radius: 6.5, slowPct: 60, duration: 5, frostDps: 18 },
+    stats: { radius: 15.5, slowPct: 97, duration: 20, frostDps: 130 },
   },
   {
     id: 'killingFrost2',
@@ -116,7 +119,7 @@ export const frostFieldTree: AbilityTreeNode[] = [
     desc: '65% slow for 6s, now dealing 32 dmg/s to anyone caught in it.',
     cost: T2,
     requires: 'killingFrost1',
-    stats: { radius: 7, slowPct: 65, duration: 6, frostDps: 32 },
+    stats: { radius: 17, slowPct: 98, duration: 22, frostDps: 200 },
   },
 ];
 
@@ -128,7 +131,7 @@ export const blinkTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['arcaneRebound1'],
-    stats: { range: 26, charges: 2 },
+    stats: { range: 54, charges: 4 },
   },
   {
     id: 'blinkCascade2',
@@ -136,7 +139,7 @@ export const blinkTree: AbilityTreeNode[] = [
     desc: 'A third banked charge, range 28 — up to three blinks back to back.',
     cost: T2,
     requires: 'blinkCascade1',
-    stats: { range: 28, charges: 3 },
+    stats: { range: 58, charges: 5 },
   },
   {
     id: 'arcaneRebound1',
@@ -145,7 +148,7 @@ export const blinkTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['blinkCascade1'],
-    stats: { range: 24, reboundDamage: 60, reboundRadius: 4, reboundSlowPct: 40, reboundSlowDuration: 2 },
+    stats: { range: 54, reboundDamage: 300, reboundRadius: 7.5, reboundSlowPct: 55, reboundSlowDuration: 3 },
   },
   {
     id: 'arcaneRebound2',
@@ -153,6 +156,6 @@ export const blinkTree: AbilityTreeNode[] = [
     desc: '110 dmg and a 55% slow for 3s in a 5-unit radius at the departure point.',
     cost: T2,
     requires: 'arcaneRebound1',
-    stats: { range: 26, reboundDamage: 110, reboundRadius: 5, reboundSlowPct: 55, reboundSlowDuration: 3 },
+    stats: { range: 58, reboundDamage: 480, reboundRadius: 9, reboundSlowPct: 70, reboundSlowDuration: 4 },
   },
 ];

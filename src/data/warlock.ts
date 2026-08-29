@@ -356,12 +356,13 @@ const umbralFlight: AbilityWithTree = {
     { cost: 40, stats: { duration: 3.9, ceiling: 11 } },
     { cost: 80, stats: { duration: 4.6, ceiling: 12 } },
     { cost: 140, stats: { duration: 5.4, ceiling: 12 } },
-    // Deep ranks: long enough to cross the field draining the whole way, with a launch that
-    // gathers the horde beneath you before your feet leave the ground.
+    // Deep ranks buy time and altitude only — long enough to cross the field draining the whole
+    // way. The launch downdraft stays exclusively with the Dread Takeoff Mastery branch: granting
+    // it here as well left that branch with nothing of its own to sell.
     { cost: 400, stats: { duration: 6.5, ceiling: 13 } },
-    { cost: 1000, stats: { duration: 8, ceiling: 14, downdraftDamage: 70, downdraftRadius: 4.5, downdraftPull: 3 } },
-    { cost: 2500, stats: { duration: 10, ceiling: 15, downdraftDamage: 130, downdraftRadius: 5.5 } },
-    { cost: 6000, stats: { duration: 13, ceiling: 17, downdraftDamage: 220, downdraftRadius: 7, downdraftPull: 5 } },
+    { cost: 1000, stats: { duration: 8, ceiling: 14 } },
+    { cost: 2500, stats: { duration: 10, ceiling: 15 } },
+    { cost: 6000, stats: { duration: 13, ceiling: 17 } },
   ],
   tree: umbralFlightTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {

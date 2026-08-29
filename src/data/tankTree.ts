@@ -16,7 +16,7 @@ export const shieldBashTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['vanguard1'],
-    stats: { damage: 22, range: 4.1, reductionPerHitPct: 6, reductionDuration: 2.5 },
+    stats: { damage: 270, range: 7, reductionPerHitPct: 6, reductionDuration: 2.5 },
   },
   {
     id: 'riposte2',
@@ -24,7 +24,7 @@ export const shieldBashTree: AbilityTreeNode[] = [
     desc: '9% reduction per enemy hit, lasting 3s.',
     cost: T2,
     requires: 'riposte1',
-    stats: { damage: 28, range: 4.4, reductionPerHitPct: 9, reductionDuration: 3 },
+    stats: { damage: 320, range: 7.5, reductionPerHitPct: 12, reductionDuration: 4 },
   },
   {
     id: 'vanguard1',
@@ -33,7 +33,7 @@ export const shieldBashTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['riposte1'],
-    stats: { damage: 24, range: 4.1, healPerHit: 4 },
+    stats: { damage: 275, range: 7, healPerHit: 18 },
   },
   {
     id: 'vanguard2',
@@ -41,7 +41,7 @@ export const shieldBashTree: AbilityTreeNode[] = [
     desc: 'Heals 7 HP per enemy hit.',
     cost: T2,
     requires: 'vanguard1',
-    stats: { damage: 30, range: 4.4, healPerHit: 7 },
+    stats: { damage: 330, range: 7.5, healPerHit: 35 },
   },
 ];
 
@@ -53,7 +53,7 @@ export const shieldSlamTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['focusedSlam1'],
-    stats: { damage: 60, radius: 4.3, stunDuration: 1.2, stunPerTarget: 0.25, stunCap: 2.6 },
+    stats: { damage: 360, radius: 9.5, stunDuration: 3.2, stunPerTarget: 0.25, stunCap: 4.5 },
   },
   {
     id: 'concussiveSlam2',
@@ -61,7 +61,7 @@ export const shieldSlamTree: AbilityTreeNode[] = [
     desc: '+0.35s stun per target, capped at 3.2s.',
     cost: T2,
     requires: 'concussiveSlam1',
-    stats: { damage: 75, radius: 4.6, stunDuration: 1.4, stunPerTarget: 0.35, stunCap: 3.2 },
+    stats: { damage: 430, radius: 11, stunDuration: 3.6, stunPerTarget: 0.4, stunCap: 6 },
   },
   {
     id: 'focusedSlam1',
@@ -70,7 +70,7 @@ export const shieldSlamTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['concussiveSlam1'],
-    stats: { damage: 70, radius: 2.2, stunDuration: 1.6, focusBonusDamage: 60, focusStunBonus: 1.2 },
+    stats: { damage: 380, radius: 9, stunDuration: 3.4, focusBonusDamage: 320, focusStunBonus: 1.2 },
   },
   {
     id: 'focusedSlam2',
@@ -78,7 +78,7 @@ export const shieldSlamTree: AbilityTreeNode[] = [
     desc: '+100 bonus damage and +1.8s bonus stun on the single closest target.',
     cost: T2,
     requires: 'focusedSlam1',
-    stats: { damage: 85, radius: 2.4, stunDuration: 1.9, focusBonusDamage: 100, focusStunBonus: 1.8 },
+    stats: { damage: 460, radius: 9.5, stunDuration: 4, focusBonusDamage: 520, focusStunBonus: 2 },
   },
 ];
 
@@ -90,7 +90,7 @@ export const bulwarkTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['retaliation1'],
-    stats: { reductionPct: 55, duration: 5, shieldAmount: 80, shieldDuration: 5 },
+    stats: { reductionPct: 94, duration: 12, shieldAmount: 750, shieldDuration: 8 },
   },
   {
     id: 'aegisOverflow2',
@@ -98,7 +98,7 @@ export const bulwarkTree: AbilityTreeNode[] = [
     desc: '150 HP absorb shield, 60% reduction for 6s.',
     cost: T2,
     requires: 'aegisOverflow1',
-    stats: { reductionPct: 60, duration: 6, shieldAmount: 150, shieldDuration: 6 },
+    stats: { reductionPct: 96, duration: 14, shieldAmount: 1200, shieldDuration: 10 },
   },
   {
     id: 'retaliation1',
@@ -107,7 +107,7 @@ export const bulwarkTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['aegisOverflow1'],
-    stats: { reductionPct: 50, duration: 5, thornsRadius: 5, thornsDamage: 20 },
+    stats: { reductionPct: 94, duration: 12, thornsRadius: 7.5, thornsDamage: 200 },
   },
   {
     id: 'retaliation2',
@@ -115,7 +115,7 @@ export const bulwarkTree: AbilityTreeNode[] = [
     desc: '35 dmg retaliation pulse across a 6-unit radius.',
     cost: T2,
     requires: 'retaliation1',
-    stats: { reductionPct: 55, duration: 6, thornsRadius: 6, thornsDamage: 35 },
+    stats: { reductionPct: 96, duration: 14, thornsRadius: 9, thornsDamage: 380 },
   },
 ];
 
@@ -127,7 +127,7 @@ export const shieldChargeTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['bulwarkCharge1'],
-    stats: { speed: 9.0, damage: 70, radius: 3.8, stunDuration: 1.3, sweepRadius: 2.2, sweepDamage: 30 },
+    stats: { speed: 9.6, damage: 330, radius: 7.6, stunDuration: 2.4, sweepRadius: 8, sweepDamage: 240 },
   },
   {
     id: 'juggernaut2',
@@ -135,7 +135,7 @@ export const shieldChargeTree: AbilityTreeNode[] = [
     desc: '50 dmg, 2.6-unit sweep along the whole charge.',
     cost: T2,
     requires: 'juggernaut1',
-    stats: { speed: 9.5, damage: 85, radius: 4.0, stunDuration: 1.5, sweepRadius: 2.6, sweepDamage: 50 },
+    stats: { speed: 10, damage: 400, radius: 8.4, stunDuration: 2.8, sweepRadius: 9.5, sweepDamage: 340 },
   },
   {
     id: 'bulwarkCharge1',
@@ -144,7 +144,7 @@ export const shieldChargeTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['juggernaut1'],
-    stats: { speed: 8.8, damage: 65, radius: 3.6, stunDuration: 1.2, chargeReductionPct: 45, chargeReductionDuration: 2.5 },
+    stats: { speed: 9.4, damage: 320, radius: 7.5, stunDuration: 2.4, chargeReductionPct: 60, chargeReductionDuration: 5 },
   },
   {
     id: 'bulwarkCharge2',
@@ -152,6 +152,6 @@ export const shieldChargeTree: AbilityTreeNode[] = [
     desc: '60% damage reduction through the charge and landing.',
     cost: T2,
     requires: 'bulwarkCharge1',
-    stats: { speed: 9.2, damage: 78, radius: 3.8, stunDuration: 1.4, chargeReductionPct: 60, chargeReductionDuration: 3 },
+    stats: { speed: 9.6, damage: 380, radius: 8, stunDuration: 2.7, chargeReductionPct: 75, chargeReductionDuration: 7 },
   },
 ];

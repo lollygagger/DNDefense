@@ -53,7 +53,7 @@ export const curseOfAgonyTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['agonizingMark1'],
-    stats: { radius: 6.5, dps: 55, duration: 6, vulnPct: 20 },
+    stats: { radius: 12.5, dps: 230, duration: 10, vulnPct: 48 },
   },
   {
     id: 'festeringCurse2',
@@ -61,7 +61,7 @@ export const curseOfAgonyTree: AbilityTreeNode[] = [
     desc: 'Radius 8, 80 dmg/s — the curse alone can carry a fight against a clustered wave.',
     cost: T2,
     requires: 'festeringCurse1',
-    stats: { radius: 8, dps: 80, duration: 7, vulnPct: 20 },
+    stats: { radius: 14.5, dps: 330, duration: 12, vulnPct: 48 },
   },
   {
     id: 'agonizingMark1',
@@ -70,7 +70,7 @@ export const curseOfAgonyTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['festeringCurse1'],
-    stats: { radius: 5, dps: 20, duration: 6, vulnPct: 40, slowPct: 30 },
+    stats: { radius: 11.5, dps: 180, duration: 10, vulnPct: 62, slowPct: 50 },
   },
   {
     id: 'agonizingMark2',
@@ -78,7 +78,7 @@ export const curseOfAgonyTree: AbilityTreeNode[] = [
     desc: '+55% dmg taken and a 40% slow for 7s — the deepest single debuff in the kit.',
     cost: T2,
     requires: 'agonizingMark1',
-    stats: { radius: 5.5, dps: 26, duration: 7, vulnPct: 55, slowPct: 40 },
+    stats: { radius: 12, dps: 200, duration: 12, vulnPct: 78, slowPct: 60 },
   },
 ];
 
@@ -90,7 +90,7 @@ export const abyssalGraspTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['bindingChains1'],
-    stats: { radius: 5, pullAmount: 4, slowPct: 70, duration: 2, damage: 40 },
+    stats: { radius: 12, pullAmount: 12, slowPct: 93, duration: 5, damage: 400 },
   },
   {
     id: 'crushingVoid2',
@@ -98,7 +98,7 @@ export const abyssalGraspTree: AbilityTreeNode[] = [
     desc: '75 dmg on collapse, a stronger 5-unit pull — bunch a group and hurt it in the same cast.',
     cost: T2,
     requires: 'crushingVoid1',
-    stats: { radius: 5.5, pullAmount: 5, slowPct: 78, duration: 2.5, damage: 75 },
+    stats: { radius: 13.5, pullAmount: 13, slowPct: 95, duration: 5.5, damage: 620 },
   },
   {
     id: 'bindingChains1',
@@ -107,7 +107,7 @@ export const abyssalGraspTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['crushingVoid1'],
-    stats: { radius: 5, pullAmount: 3.5, slowPct: 70, duration: 2, stunDuration: 1.0 },
+    stats: { radius: 12, pullAmount: 12, slowPct: 93, duration: 5, stunDuration: 2.4 },
   },
   {
     id: 'bindingChains2',
@@ -115,7 +115,7 @@ export const abyssalGraspTree: AbilityTreeNode[] = [
     desc: 'A 1.5s stun on everything the rift catches — the longest hard lockdown in the Warlock kit.',
     cost: T2,
     requires: 'bindingChains1',
-    stats: { radius: 5.5, pullAmount: 4, slowPct: 78, duration: 2.5, stunDuration: 1.5 },
+    stats: { radius: 13.5, pullAmount: 13, slowPct: 95, duration: 5.5, stunDuration: 3.2 },
   },
 ];
 
@@ -123,35 +123,35 @@ export const umbralFlightTree: AbilityTreeNode[] = [
   {
     id: 'endlessWings1',
     name: 'Endless Wings',
-    desc: 'Stay airborne two seconds longer, and drift faster while you are. Enough time for the beam to reach full lock on something that cannot reach back.',
+    desc: 'Stay airborne 17 seconds — four beyond even a fully ranked flight — and climb higher while you are. Enough time for the beam to reach full lock on anything that cannot reach back.',
     cost: T1,
     requires: null,
     excludes: ['dreadTakeoff1'],
-    stats: { duration: 7.4, ceiling: 13 },
+    stats: { duration: 17, ceiling: 19 },
   },
   {
     id: 'endlessWings2',
     name: 'Wings of the Abyss',
-    desc: 'Nearly ten seconds aloft and a higher ceiling — long enough to cross the whole field above the horde, draining the entire way.',
+    desc: 'Twenty-two seconds aloft and a ceiling of 21 — long enough to cross the whole field above the horde, draining the entire way.',
     cost: T2,
     requires: 'endlessWings1',
-    stats: { duration: 9.6, ceiling: 15 },
+    stats: { duration: 22, ceiling: 21 },
   },
   {
     id: 'dreadTakeoff1',
     name: 'Dread Takeoff',
-    desc: 'The downdraft as you launch deals 60 dmg and drags everything within 4.5 units inward — you leave the ground and the horde bunches up right where you are about to hover.',
+    desc: 'The downdraft as you launch deals 260 dmg and drags everything within 5.5 units inward — you leave the ground and the horde bunches up right where you are about to hover. The only source of the downdraft; the linear ranks never grant it.',
     cost: T1,
     requires: null,
     excludes: ['endlessWings1'],
-    stats: { downdraftDamage: 60, downdraftRadius: 4.5, downdraftPull: 3 },
+    stats: { downdraftDamage: 260, downdraftRadius: 5.5, downdraftPull: 4 },
   },
   {
     id: 'dreadTakeoff2',
     name: 'Maelstrom Ascent',
-    desc: '110 dmg and a 5-unit pull across a wider draft — take off inside a pack and it is packed tighter, beneath you, before your feet leave the dirt.',
+    desc: '480 dmg and a 6-unit pull across a wider draft — take off inside a pack and it is packed tighter, beneath you, before your feet leave the dirt.',
     cost: T2,
     requires: 'dreadTakeoff1',
-    stats: { downdraftDamage: 110, downdraftRadius: 6, downdraftPull: 5 },
+    stats: { downdraftDamage: 480, downdraftRadius: 7.5, downdraftPull: 6 },
   },
 ];

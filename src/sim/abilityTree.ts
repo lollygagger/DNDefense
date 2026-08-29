@@ -21,12 +21,26 @@ import type { GameState } from './GameState';
  *  before the cheap linear ranks a poor trade in practice, without needing a hard rule to enforce it. */
 
 export interface AbilityTreeNode extends UpgradeNode {
-  /** Stats this node grants once purchased — merged on top of the ability's linear rank stats
-   *  (see sim/classes.ts's getAbilityStats), same override-wins-last convention as AbilityRank.
-   *  Absolute totals, not deltas — exactly like a structure upgrade's tier-2 node restating the
-   *  tier-1 numbers as a bigger total rather than stacking on top of it. */
+  /** Stats this node grants once purchased, merged on top of the ability's linear rank stats (see
+   *  sim/classes.ts's getAbilityStats). Absolute totals, not deltas — a tier-2 node restates the
+   *  tier-1 numbers as a bigger total rather than stacking on top of it.
+   *
+   *  Restating totals means a node also restates stats it isn't really changing, at whatever the
+   *  numbers were when it was authored. That was harmless while ranks stopped at IV, but ranks now
+   *  run to X, so a plain override would let a Mastery purchase *downgrade* a deep-ranked ability
+   *  — buying Wings of the Abyss cutting a rank-X flight from 13s to 9.6s. applyTreeStats keeps
+   *  whichever value is better instead, so a node can only ever add. */
   stats: Record<string, number>;
+  /** Stat keys this node means to force even when that makes them WORSE — a real trade, not a
+   *  stale restatement. Fork Bolt genuinely gives up piercing to split, Empowered Bolt genuinely
+   *  collapses back to a single bolt, War Leap genuinely drops the stun for a shorter cooldown.
+   *  Without this they'd keep the deep ranks' pierce/volley/stun and their branches would stop
+   *  meaning anything. */
+  overrides?: string[];
 }
+
+/** Stats where a SMALLER number is the better one, so "keep the better value" doesn't mean max. */
+const LOWER_IS_BETTER = new Set(['cooldownMult']);
 
 export interface AbilityWithTree extends AbilityDef {
   /** Optional late-game branching tree hanging off the ability's linear ranks. Absent = no
@@ -97,12 +111,27 @@ export function buyAbilityTreeNode(
  *  order (a capstone listed after its tier-1 prerequisite always overrides it, exactly like
  *  AbilityRank merging). Called from sim/classes.ts's getAbilityStats and applied on top of the
  *  linear rank stats, so a tree node only needs to name the stats it actually changes. */
-export function treeStats(player: PlayerState, def: AbilityDef): Record<string, number> {
+/** Merge every purchased Mastery node into `base` (the ability's merged linear-rank stats), in
+ *  tree order so a tier-2 node lands after its tier-1 prerequisite.
+ *
+ *  A node never lowers a stat it already shares with the ranks — see AbilityTreeNode.stats for
+ *  why that matters now that ranks run to X — unless it names the key in `overrides`, which marks
+ *  a deliberate trade rather than a stale restatement. Keys the ranks don't have at all are
+ *  simply granted; that's how a node adds something genuinely new. */
+export function applyTreeStats(player: PlayerState, def: AbilityDef, base: Record<string, number>): void {
   const tree = abilityTree(def);
-  if (tree.length === 0) return {};
+  if (tree.length === 0) return;
   const owned = purchasedTreeNodes(player, def.id);
-  if (owned.length === 0) return {};
-  const out: Record<string, number> = {};
-  for (const node of tree) if (owned.includes(node.id)) Object.assign(out, node.stats);
-  return out;
+  if (owned.length === 0) return;
+  for (const node of tree) {
+    if (!owned.includes(node.id)) continue;
+    for (const [key, value] of Object.entries(node.stats)) {
+      const current = base[key];
+      if (current === undefined || node.overrides?.includes(key)) {
+        base[key] = value;
+        continue;
+      }
+      base[key] = LOWER_IS_BETTER.has(key) ? Math.min(current, value) : Math.max(current, value);
+    }
+  }
 }

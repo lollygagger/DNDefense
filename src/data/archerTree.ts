@@ -16,7 +16,7 @@ export const quickshotTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['stormQuiver1'],
-    stats: { damage: 26, autoFire: 1, aoeRadius: 2.5, fireRateMult: 0.55, projSpeedMult: 0.6 },
+    stats: { damage: 210, autoFire: 1, aoeRadius: 5, fireRateMult: 0.55, projSpeedMult: 0.6 },
   },
   {
     id: 'ballisticRounds2',
@@ -24,7 +24,7 @@ export const quickshotTree: AbilityTreeNode[] = [
     desc: '34 dmg per shot, splash grows to 3.5 units — a hand-held siege weapon against a packed lane.',
     cost: T2,
     requires: 'ballisticRounds1',
-    stats: { damage: 34, autoFire: 1, aoeRadius: 3.5, fireRateMult: 0.5, projSpeedMult: 0.55 },
+    stats: { damage: 250, autoFire: 1, aoeRadius: 6.5, fireRateMult: 0.5, projSpeedMult: 0.55 },
   },
   {
     id: 'stormQuiver1',
@@ -33,7 +33,7 @@ export const quickshotTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['ballisticRounds1'],
-    stats: { damage: 24, autoFire: 1, chainJumps: 2, chainRadius: 6, chainFalloff: 0.6 },
+    stats: { damage: 205, autoFire: 1, chainJumps: 5, chainRadius: 8, chainFalloff: 0.7 },
   },
   {
     id: 'stormQuiver2',
@@ -41,7 +41,7 @@ export const quickshotTree: AbilityTreeNode[] = [
     desc: 'Chains to 4 targets within 7.5 units, falloff eased to 35% per jump — a full-auto stream that can sweep an entire line.',
     cost: T2,
     requires: 'stormQuiver1',
-    stats: { damage: 30, autoFire: 1, chainJumps: 4, chainRadius: 7.5, chainFalloff: 0.65 },
+    stats: { damage: 240, autoFire: 1, chainJumps: 8, chainRadius: 10, chainFalloff: 0.8 },
   },
 ];
 
@@ -53,7 +53,7 @@ export const piercingShotTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['huntersMark1'],
-    stats: { damage: 170, pierce: 99, explodeRadius: 3.5, explodeDamage: 90 },
+    stats: { damage: 820, pierce: 99, explodeRadius: 7.5, explodeDamage: 430 },
   },
   {
     id: 'explosiveTip2',
@@ -61,7 +61,7 @@ export const piercingShotTree: AbilityTreeNode[] = [
     desc: '200 dmg down the line, 140 dmg AoE (radius 4.5) on impact.',
     cost: T2,
     requires: 'explosiveTip1',
-    stats: { damage: 200, pierce: 99, explodeRadius: 4.5, explodeDamage: 140 },
+    stats: { damage: 920, pierce: 99, explodeRadius: 9, explodeDamage: 620 },
   },
   {
     id: 'huntersMark1',
@@ -70,7 +70,7 @@ export const piercingShotTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['explosiveTip1'],
-    stats: { damage: 170, pierce: 99, markPct: 25, markDuration: 4 },
+    stats: { damage: 820, pierce: 99, markPct: 45, markDuration: 5 },
   },
   {
     id: 'huntersMark2',
@@ -78,7 +78,7 @@ export const piercingShotTree: AbilityTreeNode[] = [
     desc: '+40% damage taken from your other attacks for 5s on everything pierced.',
     cost: T2,
     requires: 'huntersMark1',
-    stats: { damage: 190, pierce: 99, markPct: 40, markDuration: 5 },
+    stats: { damage: 920, pierce: 99, markPct: 60, markDuration: 6 },
   },
 ];
 
@@ -90,7 +90,7 @@ export const pinningShotTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['webOfArrows1'],
-    stats: { damage: 22, slowPct: 80, duration: 4, crippleStackPct: 12, crippleMaxStacks: 4 },
+    stats: { damage: 260, slowPct: 96, duration: 10, crippleStackPct: 12, crippleMaxStacks: 4 },
   },
   {
     id: 'cripplingShot2',
@@ -98,7 +98,7 @@ export const pinningShotTree: AbilityTreeNode[] = [
     desc: '18% shred per stack, up to 5 stacks, on an 88% slow lasting 5s.',
     cost: T2,
     requires: 'cripplingShot1',
-    stats: { damage: 28, slowPct: 88, duration: 5, crippleStackPct: 18, crippleMaxStacks: 5 },
+    stats: { damage: 300, slowPct: 97, duration: 12, crippleStackPct: 20, crippleMaxStacks: 6 },
   },
   {
     id: 'webOfArrows1',
@@ -107,7 +107,7 @@ export const pinningShotTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['cripplingShot1'],
-    stats: { damage: 20, slowPct: 78, duration: 4, webRadius: 4, webSlowPct: 35 },
+    stats: { damage: 260, slowPct: 96, duration: 10, webRadius: 8.5, webSlowPct: 88 },
   },
   {
     id: 'webOfArrows2',
@@ -115,7 +115,7 @@ export const pinningShotTree: AbilityTreeNode[] = [
     desc: 'A 45% slow spreads across a 5.5-unit radius around your mark.',
     cost: T2,
     requires: 'webOfArrows1',
-    stats: { damage: 24, slowPct: 85, duration: 4.5, webRadius: 5.5, webSlowPct: 45 },
+    stats: { damage: 300, slowPct: 97, duration: 12, webRadius: 10, webSlowPct: 95 },
   },
 ];
 
@@ -127,7 +127,7 @@ export const grappleTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['pitonShot1'],
-    stats: { range: 32, pullSpeedMult: 1.4, cooldownMult: 0.7 },
+    stats: { range: 72, pullSpeedMult: 1.8, cooldownMult: 0.45 },
   },
   {
     id: 'quickdrawRig2',
@@ -135,7 +135,7 @@ export const grappleTree: AbilityTreeNode[] = [
     desc: '80% faster reel, 50% of normal cooldown, range 36 — the fastest, most spammable mobility tool in the game.',
     cost: T2,
     requires: 'quickdrawRig1',
-    stats: { range: 36, pullSpeedMult: 1.8, cooldownMult: 0.5 },
+    stats: { range: 78, pullSpeedMult: 2.2, cooldownMult: 0.3 },
   },
   {
     id: 'pitonShot1',
@@ -144,7 +144,7 @@ export const grappleTree: AbilityTreeNode[] = [
     cost: T1,
     requires: null,
     excludes: ['quickdrawRig1'],
-    stats: { range: 28, pitonRadius: 4, pitonDamage: 35, pitonPull: 6 },
+    stats: { range: 72, pitonRadius: 7, pitonDamage: 380, pitonPull: 6 },
   },
   {
     id: 'pitonShot2',
@@ -152,6 +152,6 @@ export const grappleTree: AbilityTreeNode[] = [
     desc: '60 dmg and a 9-unit yank on anything within 5 units of the hook.',
     cost: T2,
     requires: 'pitonShot1',
-    stats: { range: 30, pitonRadius: 5, pitonDamage: 60, pitonPull: 9 },
+    stats: { range: 78, pitonRadius: 8.5, pitonDamage: 560, pitonPull: 9 },
   },
 ];

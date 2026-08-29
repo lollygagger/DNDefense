@@ -3,7 +3,7 @@ import { allocId, type AbilityDef, type PlayerClassDef, type PlayerState } from 
 import type { GameState } from './GameState';
 import { PLAYER_SPAWN } from '../data/castle';
 import { consumeShield, pulseThornsIfReady, tickAbilityEffects } from './abilityEffects';
-import { treeStats } from './abilityTree';
+import { applyTreeStats } from './abilityTree';
 export {
   abilityTree,
   buyAbilityTreeNode,
@@ -120,9 +120,9 @@ export function getAbilityStats(player: PlayerState, abilityId: string): Record<
   for (let i = 0; i <= rank && i < def.ranks.length; i++) {
     Object.assign(stats, def.ranks[i].stats);
   }
-  // Late-game Mastery tree (sim/abilityTree.ts) always applies on top of the linear ranks, not
-  // instead of them — a purchased node only needs to name the stats it actually changes.
-  Object.assign(stats, treeStats(player, def));
+  // Late-game Mastery tree (sim/abilityTree.ts) applies on top of the linear ranks, not instead
+  // of them, and can only ever improve a stat the ranks already provide — see applyTreeStats.
+  applyTreeStats(player, def, stats);
   return stats;
 }
 

@@ -174,10 +174,21 @@ ceiling that pure numbers run into:
 | Abyssal Grasp | **Damage and a stun** — the clumped, motionless target a maxed beam wants |
 | Umbral Flight | 13s aloft, and a **downdraft** that gathers the horde beneath you |
 
-Some of these grant stats a Mastery node also grants. That is not a conflict: `treeStats` applies
-*on top of* the linear ranks, so a Mastery pick still overrides and remains the bigger
-specialization — deep ranks give everyone a baseline of the effect, Mastery is still where you
-choose which one to lean into.
+**Mastery nodes can only ever improve a stat, never lower one.** This needed fixing when deep
+ranks landed. A Mastery node lists *absolute totals*, restating stats it isn't really changing at
+whatever the numbers were when it was written — harmless while ranks stopped at IV, but with ranks
+running to X a plain override meant buying a Mastery node **downgraded** the ability. Wings of the
+Abyss cut a rank-X flight from 13s to 9.6s; across the whole game 80 nodes did something similar.
+
+`applyTreeStats` now keeps whichever value is better (smaller, for the handful of stats where
+smaller is better, like `cooldownMult`). A node can still force a stat *down* when that is a real
+trade rather than a stale restatement — Fork Bolt genuinely gives up piercing to split, Empowered
+Bolt genuinely collapses the volley back to one bolt, War Leap genuinely drops its stun for a
+shorter cooldown — by naming those keys in its `overrides` list.
+
+The node values themselves were also raised to sit above the deep ranks, so no Mastery node is a
+dead purchase for a maxed character: deep ranks give everyone a baseline of an effect, and Mastery
+is still where you choose which one to push far past it.
 
 ### Late-game ability Mastery trees
 
