@@ -38,14 +38,33 @@ export interface SimEnemy extends Enemy {
   yaw: number; // facing (radians, atan2(dx, dz)); updated by movement
 }
 
-export function spawnEnemy(game: GameState, defId: string, mods?: SpawnMods): Enemy | null {
+/** An explicit slot in a marching formation, replacing the default random lane + spawn line.
+ *  `speed` is the column's shared march pace: every member of a column moves at the same speed or
+ *  the ranks invert within seconds (see FORMATION in data/enemies.ts), which also means the usual
+ *  per-enemy speed jitter is deliberately skipped for formed-up troops — jitter is what smears a
+ *  formation back into a crowd. Flyers pass no placement and keep the old scattered behaviour;
+ *  they are airborne and a ground formation means nothing to them. */
+export interface SpawnPlacement {
+  x: number;
+  z: number;
+  speed: number;
+}
+
+export function spawnEnemy(
+  game: GameState,
+  defId: string,
+  mods?: SpawnMods,
+  placement?: SpawnPlacement
+): Enemy | null {
   const def = getEnemyDef(defId);
   const hpMult = mods?.hpMult ?? 1;
   const speedMult = mods?.speedMult ?? 1;
   const goldMult = mods?.goldMult ?? 1;
 
-  const spawnX = game.rng.range(-ENEMY_AI.spawnXRange, ENEMY_AI.spawnXRange);
-  const jitter = game.rng.range(ENEMY_AI.speedJitterMin, ENEMY_AI.speedJitterMax);
+  const spawnX = placement ? placement.x : game.rng.range(-ENEMY_AI.spawnXRange, ENEMY_AI.spawnXRange);
+  const spawnZ = placement ? placement.z : ENEMY_SPAWN_Z;
+  const jitter = placement ? 1 : game.rng.range(ENEMY_AI.speedJitterMin, ENEMY_AI.speedJitterMax);
+  const baseSpeed = placement ? placement.speed : def.speed;
   const hp = Math.round(def.hp * hpMult);
 
   const e: SimEnemy = {
@@ -53,13 +72,13 @@ export function spawnEnemy(game: GameState, defId: string, mods?: SpawnMods): En
     team: 'attacker',
     defId,
     def,
-    pos: new Vector3(spawnX, 0, ENEMY_SPAWN_Z),
+    pos: new Vector3(spawnX, 0, spawnZ),
     radius: def.radius,
     height: def.height,
     hp,
     maxHp: hp,
     alive: true,
-    moveSpeed: def.speed * speedMult * jitter,
+    moveSpeed: baseSpeed * speedMult * jitter,
     goldMult,
     laneX: spawnX,
     // small stagger so simultaneous spawns don't attack/shoot in lockstep

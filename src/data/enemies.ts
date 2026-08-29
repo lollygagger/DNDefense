@@ -181,6 +181,53 @@ export const FLYER_AI: Record<string, FlyerAI> = {
   },
 };
 
+/** Battle-formation tuning. Waves march in as COLUMNS — combined-arms blocks that spawn as one
+ *  body, ranked front-to-back by role — rather than each enemy type trickling in independently at
+ *  a random lane x. The old model produced a thin, scattered stream that arrived a few units at a
+ *  time and could be cut down piecemeal; a column arrives all at once, with its heavies already
+ *  between you and its archers.
+ *
+ *  A formation only reads as one if it stays together, and it cannot: goblins move at 4.5 and orcs
+ *  at 2.2, so any column left to its own speeds would invert itself within seconds — the light
+ *  troops overtaking the heavies they are supposed to be screened by. So a column marches at ONE
+ *  shared pace (see marchMult), which is what actually holds "tanks in front, archers behind"
+ *  together over an 80-unit approach. */
+export const FORMATION = {
+  rankSpacing: 3.2, // z gap between successive ranks (and between wrapped sub-rows of one rank)
+  fileSpacing: 2.6, // x gap between neighbours within a rank
+  halfWidth: 16, // widest a rank may spread before it wraps to a sub-row behind
+  targetColumnSize: 12, // rough number of bodies per column; drives how many columns a wave splits into
+  minColumns: 2, // even a small wave arrives as two groups — "waves upon waves"
+  maxColumns: 5,
+  columnGap: 10, // seconds between successive columns setting off
+  /** A column marches at its slowest member's speed times this, capped at its fastest member's.
+   *  Pure slowest-member pace is the real-world rule but reads as a slog here: an orc column
+   *  would take ~36s to cross the 80-unit approach, and it would drag every goblin down with it.
+   *  Disciplined ranks move better than a lone straggler, so 1.5x — an orc/goblin/archer column
+   *  crosses in ~24s, quicker than orcs manage alone today and slower than a goblin rush. */
+  marchMult: 1.5,
+  centerJitter: 7, // how far a column's centre may sit off the middle lane, so groups vary
+};
+
+/** Front-to-back rank within a column: 0 leads. Heavies screen, light melee fills in behind them,
+ *  ranged brings up the rear where it can shoot over the top. A companion lookup rather than a
+ *  field on the FROZEN EnemyDef — the same pattern FLYER_AI above uses for per-enemy quirks. */
+const FORMATION_RANK: Record<string, number> = {
+  orcWarlord: 0,
+  orc: 0,
+  goblin: 1,
+  skeletonArcher: 2,
+};
+
+/** Rank for any enemy, falling back on its behaviour so a newly added type slots in sensibly
+ *  without needing an entry above: anything that shoots belongs at the back, anything else in the
+ *  melee body. Only override when a type needs to lead (a heavy) rather than fill in. */
+export function formationRank(defId: string): number {
+  const explicit = FORMATION_RANK[defId];
+  if (explicit !== undefined) return explicit;
+  return getEnemyDef(defId).behavior === 'ranged' ? 2 : 1;
+}
+
 export function isFlyerDef(defId: string): boolean {
   return defId in FLYER_AI;
 }

@@ -463,6 +463,41 @@ decide deliberately which defenses can hit air, and make it legible").
 
 Start gold: 150. Wave-clear bonus: 25 + 5×wave.
 
+### Enemies arrive in formed columns, not a trickle
+
+A wave is not a stream of individuals. Its ground roster is dealt into a handful of **columns** —
+combined-arms blocks that spawn as one body and march in together, `columnGap` seconds apart, so a
+wave lands as **waves upon waves** rather than one mass or one long dribble.
+
+Within a column, members sort into **ranks by role**: heavies (orcs, the Warlord) lead, light melee
+fills in behind them, ranged brings up the rear where it can shoot over the top. Each rank is a row
+of files spread about the column's centre, wrapping into a sub-row behind when it would outgrow the
+field. Every column is combined-arms — the roster is dealt round-robin, so you never face a column
+of pure archers with nothing screening them.
+
+**A column marches at one shared pace.** This is what makes the rest of it real: goblins move at
+4.5 and orcs at 2.2, so a column left to its members' own speeds would invert itself within
+seconds, the light troops overtaking the heavies meant to screen them. The shared pace is the
+slowest member's speed × 1.5, capped at the fastest member's — disciplined ranks move better than a
+lone straggler, but never better than their quickest. An orc/goblin/archer column crosses the
+80-unit approach in about 24s: quicker than orcs manage alone today, slower than a goblin rush.
+Formed-up troops also skip the usual ±8% per-enemy speed jitter, since jitter is precisely what
+smears a formation back into a crowd.
+
+This is a **difficulty increase**, deliberately. The old model spawned each type independently at
+its own interval and a random lane x, so a wave arrived a few bodies at a time and could be cut
+down piecemeal, with archers wandering in among the melee instead of behind it. A column arrives
+all at once with its heavies already between you and its archers, and the whole wave can be alive
+at the same moment.
+
+The authored `interval` no longer paces individual bodies — a formation arrives together, that is
+the point of it — but `delay` still orders the roster, so a type an author held back still lands in
+a later column. **Flyers are exempt** and keep the original scattered, independent scheduling: they
+cross above the field, where a ground formation means nothing.
+
+Endless waves scale the columns rather than multiplying them (they cap at 5), so late waves send
+bigger formations, not more of them — wave 20 fields five columns of 17.
+
 | Wave | Composition (count × type, spawn interval) |
 |---|---|
 | 1 | 6 goblins (2.5s) — tutorial pace |
