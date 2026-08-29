@@ -125,6 +125,11 @@ const groundSlam: AbilityWithTree = {
     { cost: 40, stats: { damage: 65 } },
     { cost: 80, stats: { damage: 95 } },
     { cost: 140, stats: { damage: 130, radius: 4, slowPct: 45, duration: 1.6 } },
+    // Deep ranks: the slam widens until it answers a whole column arriving at once.
+    { cost: 400, stats: { damage: 190, radius: 5 } },
+    { cost: 1000, stats: { damage: 270, radius: 6, slowPct: 55 } },
+    { cost: 2500, stats: { damage: 390, radius: 7.5, duration: 2.2 } },
+    { cost: 6000, stats: { damage: 560, radius: 9, slowPct: 70, duration: 2.8 } },
   ],
   tree: groundSlamTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -220,6 +225,13 @@ const secondWind: AbilityWithTree = {
     { cost: 40, stats: { heal: 60 } },
     { cost: 80, stats: { heal: 85 } },
     { cost: 140, stats: { heal: 120 } },
+    // Deep ranks stop scaling the heal alone — past a point it just overheals a 140hp Warrior —
+    // and turn Second Wind into a genuine combat cooldown: damage reduction to survive the swing
+    // you just healed through, then a damage buff to punish whatever caused it.
+    { cost: 400, stats: { heal: 175, reductionPct: 25, reductionDuration: 4 } },
+    { cost: 1000, stats: { heal: 240, reductionPct: 35, reductionDuration: 5, dmgBuffPct: 20, dmgBuffDuration: 5 } },
+    { cost: 2500, stats: { heal: 320, reductionPct: 45, reductionDuration: 6, dmgBuffPct: 35, dmgBuffDuration: 6 } },
+    { cost: 6000, stats: { heal: 420, reductionPct: 55, reductionDuration: 8, dmgBuffPct: 55, dmgBuffDuration: 8 } },
   ],
   tree: secondWindTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {
@@ -274,6 +286,11 @@ const leap: AbilityWithTree = {
     // is a real but bounded ~26% uptime if you keep leaping onto the same spot — a flinch, not
     // a lock — and the radius (4) is cluster-sized, not wave-sized.
     { cost: 320, stats: { speed: 8.8, damage: 95, radius: 4, stunDuration: 1.3 } },
+    // Deep ranks: a landing that scatters a formation, coming back fast enough to do it again.
+    { cost: 400, stats: { damage: 140, radius: 4.6, knockback: 3 } },
+    { cost: 1000, stats: { damage: 200, radius: 5.4, stunDuration: 1.6 } },
+    { cost: 2500, stats: { damage: 290, radius: 6.4, knockback: 5, cooldownMult: 0.8 } },
+    { cost: 6000, stats: { damage: 420, radius: 7.5, stunDuration: 2.2, cooldownMult: 0.65 } },
   ],
   tree: leapTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {

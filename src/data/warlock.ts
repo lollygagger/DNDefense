@@ -246,6 +246,11 @@ const curseOfAgony: AbilityWithTree = {
     { cost: 40, stats: { dps: 20 } },
     { cost: 80, stats: { dps: 28, radius: 5.5 } },
     { cost: 140, stats: { dps: 38, duration: 6, vulnPct: 30, radius: 6 } },
+    // Deep ranks: a curse big enough to cover an arriving column, and eventually to slow it too.
+    { cost: 400, stats: { dps: 55, radius: 7 } },
+    { cost: 1000, stats: { dps: 80, radius: 8, vulnPct: 38, duration: 7 } },
+    { cost: 2500, stats: { dps: 115, radius: 9.5, slowPct: 25 } },
+    { cost: 6000, stats: { dps: 165, radius: 11, vulnPct: 48, duration: 9, slowPct: 40 } },
   ],
   tree: curseOfAgonyTree,
   cast(game: GameState, _caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -288,6 +293,12 @@ const abyssalGrasp: AbilityWithTree = {
     { cost: 40, stats: { pullAmount: 3.6, slowPct: 68 } },
     { cost: 80, stats: { pullAmount: 4.2, slowPct: 76, duration: 2.5 } },
     { cost: 140, stats: { radius: 6, pullAmount: 5, slowPct: 85, duration: 3 } },
+    // Deep ranks: the rift starts hurting what it gathers, and finally holds it outright — the
+    // clumped, motionless target a maxed beam wants to be pointed at.
+    { cost: 400, stats: { radius: 7, pullAmount: 6, damage: 60 } },
+    { cost: 1000, stats: { radius: 8, pullAmount: 7.5, duration: 3.6, damage: 110, stunDuration: 0.8 } },
+    { cost: 2500, stats: { radius: 9.5, pullAmount: 9, slowPct: 92, damage: 180, stunDuration: 1.2 } },
+    { cost: 6000, stats: { radius: 11, pullAmount: 11, duration: 4.5, damage: 280, stunDuration: 1.8 } },
   ],
   tree: abyssalGraspTree,
   cast(game: GameState, _caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -345,6 +356,12 @@ const umbralFlight: AbilityWithTree = {
     { cost: 40, stats: { duration: 3.9, ceiling: 11 } },
     { cost: 80, stats: { duration: 4.6, ceiling: 12 } },
     { cost: 140, stats: { duration: 5.4, ceiling: 12 } },
+    // Deep ranks: long enough to cross the field draining the whole way, with a launch that
+    // gathers the horde beneath you before your feet leave the ground.
+    { cost: 400, stats: { duration: 6.5, ceiling: 13 } },
+    { cost: 1000, stats: { duration: 8, ceiling: 14, downdraftDamage: 70, downdraftRadius: 4.5, downdraftPull: 3 } },
+    { cost: 2500, stats: { duration: 10, ceiling: 15, downdraftDamage: 130, downdraftRadius: 5.5 } },
+    { cost: 6000, stats: { duration: 13, ceiling: 17, downdraftDamage: 220, downdraftRadius: 7, downdraftPull: 5 } },
   ],
   tree: umbralFlightTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {

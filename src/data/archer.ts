@@ -60,10 +60,10 @@ const quickshot: AbilityWithTree = {
     // Ranks VI-X: full-auto stays, the per-shot damage climbs hard. Sustained rate is already
     // ~3.3x from autoFire, so these ranks compound with it rather than adding another mechanic.
     { cost: 600, stats: { damage: 44 } },
-    { cost: 1500, stats: { damage: 64 } },
-    { cost: 3500, stats: { damage: 92 } },
-    { cost: 7500, stats: { damage: 132 } },
-    { cost: 16000, stats: { damage: 190 } },
+    { cost: 1500, stats: { damage: 64, aoeRadius: 2 } },
+    { cost: 3500, stats: { damage: 92, aoeRadius: 2.6, chainJumps: 1, chainRadius: 5, chainFalloff: 0.6 } },
+    { cost: 7500, stats: { damage: 132, aoeRadius: 3.2, chainJumps: 2 } },
+    { cost: 16000, stats: { damage: 190, aoeRadius: 4, chainJumps: 3, chainRadius: 7 } },
   ],
   tree: quickshotTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -153,6 +153,12 @@ const piercingShot: AbilityWithTree = {
     // through the entire line instead of stopping after a handful of enemies. No cast() change
     // needed: pierce was already forwarded straight to the projectile spec.
     { cost: 220, stats: { damage: 190, pierce: 99 } },
+    // Deep ranks: the shaft already pierces everything, so these add a detonation on each body
+    // it passes through, and a mark that makes the whole kit hit the survivors harder.
+    { cost: 400, stats: { damage: 270, explodeDamage: 80, explodeRadius: 3 } },
+    { cost: 1000, stats: { damage: 380, explodeDamage: 140, explodeRadius: 4, markPct: 20, markDuration: 4 } },
+    { cost: 2500, stats: { damage: 540, explodeDamage: 220, explodeRadius: 5 } },
+    { cost: 6000, stats: { damage: 760, explodeDamage: 340, explodeRadius: 6.5, markPct: 35 } },
   ],
   tree: piercingShotTree,
   cast(game: GameState, _caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -231,6 +237,12 @@ const pinningShot: AbilityWithTree = {
     { cost: 40, stats: { damage: 12, slowPct: 65 } },
     { cost: 80, stats: { damage: 16, slowPct: 75, duration: 4 } },
     { cost: 140, stats: { damage: 20, slowPct: 85, duration: 4.5 } },
+    // Deep ranks: one pinned target becomes a web that holds everything around it — the answer
+    // to a column arriving in formation rather than to a single runner.
+    { cost: 400, stats: { damage: 45, slowPct: 90, duration: 5.5 } },
+    { cost: 1000, stats: { damage: 80, duration: 6.5, webRadius: 4, webSlowPct: 50 } },
+    { cost: 2500, stats: { damage: 140, slowPct: 95, duration: 7.5, webRadius: 5.5, webSlowPct: 65 } },
+    { cost: 6000, stats: { damage: 230, duration: 9, webRadius: 7, webSlowPct: 80 } },
   ],
   tree: pinningShotTree,
   cast(game: GameState, _caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -310,6 +322,11 @@ const grapple: AbilityWithTree = {
     { cost: 40, stats: { range: 30 } },
     { cost: 80, stats: { range: 34 } },
     { cost: 140, stats: { range: 38 } },
+    // Deep ranks: longer reach, a faster reel, and a piton that detonates where it bites.
+    { cost: 400, stats: { range: 44, pullSpeedMult: 1.2 } },
+    { cost: 1000, stats: { range: 50, cooldownMult: 0.8, pitonDamage: 90, pitonRadius: 4 } },
+    { cost: 2500, stats: { range: 58, pullSpeedMult: 1.5, pitonDamage: 160, pitonPull: 3 } },
+    { cost: 6000, stats: { range: 68, cooldownMult: 0.6, pitonDamage: 280, pitonRadius: 6, pitonPull: 4 } },
   ],
   tree: grappleTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {

@@ -78,7 +78,7 @@ const shieldBash: AbilityWithTree = {
     { cost: 1500, stats: { damage: 78, range: 5 } },
     { cost: 3500, stats: { damage: 112, range: 5.5 } },
     { cost: 7500, stats: { damage: 162, range: 6, arcDeg: 120 } },
-    { cost: 16000, stats: { damage: 235, range: 6.5 } },
+    { cost: 16000, stats: { damage: 235, range: 6.5, arcDeg: 360 } },
   ],
   tree: shieldBashTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -139,6 +139,11 @@ const shieldSlam: AbilityWithTree = {
     { cost: 40, stats: { damage: 38, stunDuration: 1.3 } },
     { cost: 80, stats: { damage: 52, stunDuration: 1.6 } },
     { cost: 140, stats: { damage: 70, radius: 4.2, stunDuration: 2.0 } },
+    // Deep ranks: a slam wide enough to stun a whole arriving rank, not just the ones on top of you.
+    { cost: 400, stats: { damage: 105, radius: 5 } },
+    { cost: 1000, stats: { damage: 150, radius: 6, stunDuration: 2.4 } },
+    { cost: 2500, stats: { damage: 215, radius: 7.2, focusBonusDamage: 120 } },
+    { cost: 6000, stats: { damage: 310, radius: 8.5, stunDuration: 3, focusBonusDamage: 220 } },
   ],
   tree: shieldSlamTree,
   cast(game: GameState, _caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -201,6 +206,12 @@ const bulwark: AbilityWithTree = {
     { cost: 40, stats: { reductionPct: 50, duration: 4.5 } },
     { cost: 80, stats: { reductionPct: 60, duration: 5 } },
     { cost: 140, stats: { reductionPct: 70, duration: 6 } },
+    // Deep ranks: reduction alone has a ceiling (you cannot go past 100%), so these add an
+    // absorb shield on top of it and eventually make standing in the middle of a swarm hurt it.
+    { cost: 400, stats: { reductionPct: 78, duration: 7, shieldAmount: 120, shieldDuration: 6 } },
+    { cost: 1000, stats: { reductionPct: 84, duration: 8, shieldAmount: 220 } },
+    { cost: 2500, stats: { reductionPct: 89, duration: 9, shieldAmount: 360, thornsDamage: 60, thornsRadius: 5 } },
+    { cost: 6000, stats: { reductionPct: 93, duration: 11, shieldAmount: 560, thornsDamage: 120, thornsRadius: 6.5 } },
   ],
   tree: bulwarkTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {
@@ -244,6 +255,11 @@ const shieldCharge: AbilityWithTree = {
     { cost: 40, stats: { speed: 6.5, damage: 30 } },
     { cost: 80, stats: { speed: 7.5, damage: 42 } },
     { cost: 140, stats: { speed: 8.5, damage: 58, radius: 3.6, stunDuration: 1.2 } },
+    // Deep ranks: the charge starts carving a path as it travels, not just where it stops.
+    { cost: 400, stats: { damage: 90, radius: 4.2, speed: 9.2 } },
+    { cost: 1000, stats: { damage: 130, radius: 5, stunDuration: 1.6, sweepDamage: 60, sweepRadius: 4 } },
+    { cost: 2500, stats: { damage: 190, radius: 6, sweepDamage: 110, sweepRadius: 5.5, chargeReductionPct: 30, chargeReductionDuration: 4 } },
+    { cost: 6000, stats: { damage: 280, radius: 7, stunDuration: 2.2, sweepDamage: 190, sweepRadius: 7, chargeReductionPct: 45 } },
   ],
   tree: shieldChargeTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, _aimPoint: Vector3, stats: Record<string, number>) {

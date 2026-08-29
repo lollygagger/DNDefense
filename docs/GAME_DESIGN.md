@@ -121,11 +121,11 @@ finding a deeper sink) is the obvious next step if the endgame economy ever need
 |---|---|---|
 | Warlock | Soul Siphon | 118 → **480 dps**, beam radius 2.2 → **8.5**, range 30 → 38 |
 | Warrior | Cleave | 58 → **520 damage**, radius 5.5 → **14** (already 360° from rank V) |
-| Mage | Arcane Bolt | 80 → **420 damage**, pierce 1 → **8** |
-| Archer | Quickshot | 30 → **190 damage** per shot, full-auto throughout |
-| Tank | Shield Bash | 28 → **235 damage**, reach 3.9 → 6.5, arc 70° → 120° |
+| Mage | Arcane Bolt | 80 → **420 damage**, pierce 1 → **8**, and fires a **4-bolt volley** |
+| Archer | Quickshot | 30 → **190 damage**, arrows **detonate** (r4) and **chain to 3** more |
+| Tank | Shield Bash | 28 → **235 damage**, reach 3.9 → 6.5, arc 70° → **360°** |
 
-Two of these change what the ability *is*, not just its numbers:
+Every one of them changes what the ability *is*, not just its numbers:
 
 - **Soul Siphon burns everything its cylinder covers**, rather than locking the single nearest
   enemy. How many it catches is simply how wide it has grown — at 8.5 it washes over most of a
@@ -138,9 +138,46 @@ Two of these change what the ability *is*, not just its numbers:
   stays pure damage with no CC, and it is still melee — you have to be standing in the middle of
   the thing you are erasing.
 
-The Tank's Shield Bash previously stopped at four ranks, which is why it felt like a chip-damage
-button forever; it now scales like the rest, while staying the shortest-reaching melee primary
-because its job is holding ground rather than clearing it.
+- **Arcane Bolt becomes a volley** — 2 bolts at rank VII, 4 at rank X, in a widening spread, each
+  piercing up to 8 bodies.
+- **Quickshot's arrows detonate and chain** — full-auto already, they gain a 4-unit blast and
+  chain to 3 further enemies, so holding the button clears a formation rather than a file.
+- **Shield Bash comes all the way round** — 70° to 360°, so the Tank standing in a swarm is hitting
+  all of it. It previously stopped at four ranks, which is why it felt like a chip-damage button
+  forever; it stays the shortest-reaching melee primary, because its job is holding ground rather
+  than clearing it.
+
+### Deep ranks on the other abilities
+
+The three non-primary abilities on every class also carry deep ranks — **400 / 1000 / 2500 /
+6000g**, cheaper than a primary's since the primary is the main scaling axis. Each uses stat levers
+its own `cast()` already reads, so these are data-only.
+
+They deliberately do more than scale a number, because most of these abilities have a natural
+ceiling that pure numbers run into:
+
+| | Deep ranks add |
+|---|---|
+| Fireball | A bigger blast that leaves the ground **burning** |
+| Frost Field | **Damage** on top of control — it kills what it holds |
+| Blink | Banked **charges** and a parting **detonation** |
+| Ground Slam | Radius 4 → 9, enough to answer a whole arriving column |
+| Second Wind | **Damage reduction + a damage buff** — heal alone just overheals a 140hp Warrior |
+| Leap | **Knockback**, a longer stun, and a shorter cooldown |
+| Piercing Shot | Each pierced body **detonates**; survivors are **marked** |
+| Pinning Shot | One pinned target becomes a **web** holding everything nearby |
+| Grapple Hook | Longer reach, faster reel, and a **piton that detonates** |
+| Shield Slam | Radius 3.5 → 8.5, stunning a whole rank |
+| Bulwark | An **absorb shield** and **thorns** — reduction alone caps at 100% |
+| Shield Charge | **Sweep damage along the path**, not just where it stops |
+| Curse of Agony | Radius 5 → 11, and eventually a **slow** |
+| Abyssal Grasp | **Damage and a stun** — the clumped, motionless target a maxed beam wants |
+| Umbral Flight | 13s aloft, and a **downdraft** that gathers the horde beneath you |
+
+Some of these grant stats a Mastery node also grants. That is not a conflict: `treeStats` applies
+*on top of* the linear ranks, so a Mastery pick still overrides and remains the bigger
+specialization — deep ranks give everyone a baseline of the effect, Mastery is still where you
+choose which one to lean into.
 
 ### Late-game ability Mastery trees
 

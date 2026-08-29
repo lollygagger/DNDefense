@@ -35,10 +35,10 @@ const arcaneBolt: AbilityWithTree = {
     // Ranks VI-X: the bolt keeps growing and keeps punching through more bodies, so a single
     // click eventually skewers most of a file rather than one enemy in it.
     { cost: 600, stats: { damage: 110, pierce: 2 } },
-    { cost: 1500, stats: { damage: 155, pierce: 3 } },
+    { cost: 1500, stats: { damage: 155, pierce: 3, count: 2, spreadDeg: 6 } },
     { cost: 3500, stats: { damage: 215, pierce: 4 } },
-    { cost: 7500, stats: { damage: 300, pierce: 5 } },
-    { cost: 16000, stats: { damage: 420, pierce: 8 } },
+    { cost: 7500, stats: { damage: 300, pierce: 5, count: 3, spreadDeg: 9 } },
+    { cost: 16000, stats: { damage: 420, pierce: 8, count: 4, spreadDeg: 12 } },
   ],
   tree: arcaneBoltTree,
   cast(game: GameState, _caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -98,6 +98,11 @@ const fireball: AbilityWithTree = {
     // the flames. Cooldown (6s) stays far above the stun (1.6s), so one caster can't approach
     // lockdown even spamming it on the same spot.
     { cost: 220, stats: { damage: 210, stunRadius: 10, stunDuration: 1.6 } },
+    // Deep ranks: a bigger blast that also leaves the ground burning.
+    { cost: 400, stats: { damage: 300, radius: 7.5 } },
+    { cost: 1000, stats: { damage: 430, radius: 8.5, stunDuration: 2, burnDps: 40, burnDuration: 3, burnRadius: 6 } },
+    { cost: 2500, stats: { damage: 620, radius: 10, stunRadius: 12, burnDps: 70 } },
+    { cost: 6000, stats: { damage: 900, radius: 12, stunRadius: 14, stunDuration: 2.6, burnDps: 110, burnRadius: 9 } },
   ],
   tree: fireballTree,
   cast(game: GameState, _caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -186,6 +191,11 @@ const frostField: AbilityWithTree = {
     // stuns everyone caught in it for a brief moment on cast, on top of the long slow. Short
     // relative to the 10s cooldown on purpose, same reasoning as Fireball's rank V.
     { cost: 220, stats: { radius: 7.5, slowPct: 70, duration: 8, stunDuration: 1.2 } },
+    // Deep ranks: the field stops being pure control and starts killing what it holds.
+    { cost: 400, stats: { radius: 9, slowPct: 78, duration: 10 } },
+    { cost: 1000, stats: { radius: 10.5, slowPct: 85, duration: 12, frostDps: 30 } },
+    { cost: 2500, stats: { radius: 12, slowPct: 92, duration: 14, frostDps: 55, stunDuration: 1.6 } },
+    { cost: 6000, stats: { radius: 14, slowPct: 97, duration: 18, frostDps: 90, stunDuration: 2.2 } },
   ],
   tree: frostFieldTree,
   cast(game: GameState, _caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -247,6 +257,11 @@ const blink: AbilityWithTree = {
     { cost: 40, stats: { range: 24 } },
     { cost: 80, stats: { range: 26 } },
     { cost: 140, stats: { range: 28 } },
+    // Deep ranks: banked charges and a parting detonation, so Blink is an escape AND a weapon.
+    { cost: 400, stats: { range: 32 } },
+    { cost: 1000, stats: { range: 36, charges: 2 } },
+    { cost: 2500, stats: { range: 42, reboundDamage: 120, reboundRadius: 5 } },
+    { cost: 6000, stats: { range: 50, charges: 3, reboundDamage: 220, reboundRadius: 6.5 } },
   ],
   tree: blinkTree,
   cast(game: GameState, caster: PlayerState, _origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
