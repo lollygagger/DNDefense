@@ -71,28 +71,69 @@ export function updateBeams(dt: number): void {
 // "grow/hold/reposition in place" idea fx.ts's own ground fields use, just for a segment instead
 // of a disc. Driven from viewmodel.ts's render loop (camera-space origin, world-space endpoint),
 // not from a sim event, since a channel's origin is the rig's own muzzle point every frame.
-let channelMesh: THREE.Mesh | null = null;
+let channelMesh: THREE.Mesh | null = null; // the wash: drawn at the beam's TRUE hit radius
+let channelCore: THREE.Mesh | null = null; // the bright thin line inside it
 const CHANNEL_UP = new THREE.Vector3(0, 1, 0);
 const channelDir = new THREE.Vector3();
+const CHANNEL_CORE_RADIUS = 0.16;
+/** The wash starts this far down the beam instead of at the muzzle. At deep ranks the beam is
+ *  metres across, so a wash drawn from the eye puts the camera *inside* the cylinder and floods
+ *  the screen with its interior wall. Skipping the first few units keeps the player outside it
+ *  while costing nothing in honesty — anything close enough to fall in that gap is already point
+ *  blank and plainly visible. The thin core still runs the whole length, so the beam always
+ *  reads as leaving the staff. */
+const CHANNEL_WASH_NEAR = 3;
 
-function ensureChannelMesh(): THREE.Mesh {
-  if (!channelMesh) {
+/** TWO meshes, because one can't tell the truth and still read as a beam.
+ *
+ *  The wash is drawn at the beam's real acquisition radius, so what you see is exactly what it
+ *  kills. That matters: the Warlock's beam widens to several units across at deep ranks, and it
+ *  was previously drawn at a fixed hairline thickness scaled by a token multiplier — at max rank
+ *  a beam drawn 0.6 units wide was killing everything within 18. Enemies well outside anything
+ *  you could see were dying, which reads as a bug however powerful it feels.
+ *
+ *  Drawn honestly and alone, though, a wide beam stops looking like a beam and becomes a fog
+ *  bank. So the wash is faint and a dense core rides inside it at a fixed hairline width — the
+ *  core is the "I am aiming a beam" read, the wash is the "this is what it covers" read. */
+function ensureChannelMeshes(): { wash: THREE.Mesh; core: THREE.Mesh } {
+  if (!channelMesh || !channelCore) {
+    // Unit geometries, scaled per frame. The wash TAPERS: full radius at the far end (radiusTop —
+    // the quaternion below maps +Y onto the beam direction, so top is the business end) and a
+    // quarter of it at the muzzle. Drawn as a true cylinder it is metres across right at the
+    // camera and swamps the screen; the taper keeps it honest exactly where the enemies are while
+    // staying out of the player's face. The narrow near section is the only place it understates,
+    // and anything that close is point blank and plainly visible anyway.
+    const washGeo = new THREE.CylinderGeometry(1, 0.25, 1, 16, 1, true);
+    const geo = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
     channelMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.045, 0.045, 1, 8, 1, true),
+      washGeo,
       new THREE.MeshBasicMaterial({
         color: 0xff2fb8,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.11, // faint: it's a volume, not a surface
         depthWrite: false,
         side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
       })
     );
-    channelMesh.frustumCulled = false;
-    channelMesh.visible = false;
-    R.scene.add(channelMesh);
+    channelCore = new THREE.Mesh(
+      geo,
+      new THREE.MeshBasicMaterial({
+        color: 0xffd4f2,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    for (const m of [channelMesh, channelCore]) {
+      m.frustumCulled = false;
+      m.visible = false;
+      R.scene.add(m);
+    }
   }
-  return channelMesh;
+  return { wash: channelMesh, core: channelCore };
 }
 
 /** Show (and reposition) or hide the persistent channel beam. `active=false` (or a missing
@@ -103,25 +144,38 @@ export function updateChannelBeam(
   from?: THREE.Vector3,
   to?: THREE.Vector3,
   color?: number,
-  girth = 1
+  radius = CHANNEL_CORE_RADIUS
 ): void {
-  const mesh = ensureChannelMesh();
+  const { wash, core } = ensureChannelMeshes();
   if (!active || !from || !to) {
-    mesh.visible = false;
+    wash.visible = false;
+    core.visible = false;
     return;
   }
   channelDir.copy(to).sub(from);
   const dist = channelDir.length();
   if (dist < 0.05) {
-    mesh.visible = false;
+    wash.visible = false;
+    core.visible = false;
     return;
   }
   channelDir.divideScalar(dist);
-  mesh.visible = true;
-  if (color !== undefined) (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
-  mesh.position.copy(from).addScaledVector(channelDir, dist / 2);
-  // X/Z are the beam's cross-section, Y its length. `girth` lets an upgraded beam read as
-  // physically thicker (see actionState.channelGirth) rather than the widening being invisible.
-  mesh.scale.set(girth, dist, girth);
-  mesh.quaternion.setFromUnitVectors(CHANNEL_UP, channelDir);
+  if (color !== undefined) (core.material as THREE.MeshBasicMaterial).color.setHex(color);
+  core.visible = true;
+  core.position.copy(from).addScaledVector(channelDir, dist / 2);
+  core.quaternion.setFromUnitVectors(CHANNEL_UP, channelDir);
+  // X/Z are the cross-section, Y the length. The core stays a hairline whatever the beam grows to.
+  core.scale.set(CHANNEL_CORE_RADIUS, dist, CHANNEL_CORE_RADIUS);
+
+  // The wash carries the real radius in world units, so it matches the hit test exactly — but it
+  // starts CHANNEL_WASH_NEAR along so the camera never ends up inside it.
+  const washLen = dist - CHANNEL_WASH_NEAR;
+  if (washLen <= 0.05) {
+    wash.visible = false;
+    return;
+  }
+  wash.visible = true;
+  wash.position.copy(from).addScaledVector(channelDir, CHANNEL_WASH_NEAR + washLen / 2);
+  wash.quaternion.copy(core.quaternion);
+  wash.scale.set(radius, washLen, radius);
 }

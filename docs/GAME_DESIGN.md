@@ -119,7 +119,7 @@ finding a deeper sink) is the obvious next step if the endgame economy ever need
 
 | Class | Primary | Rank V → Rank X |
 |---|---|---|
-| Warlock | Soul Siphon | 118 → **480 dps**, beam radius 2.2 → **8.5**, range 30 → 38 |
+| Warlock | Soul Siphon | 118 → **480 dps**, beam radius 2.2 → **5**, range 30 → 38 |
 | Warrior | Cleave | 58 → **520 damage**, radius 5.5 → **14** (already 360° from rank V) |
 | Mage | Arcane Bolt | 80 → **420 damage**, pierce 1 → **8**, and fires a **4-bolt volley** |
 | Archer | Quickshot | 30 → **190 damage**, arrows **detonate** (r4) and **chain to 3** more |
@@ -128,11 +128,20 @@ finding a deeper sink) is the obvious next step if the endgame economy ever need
 Every one of them changes what the ability *is*, not just its numbers:
 
 - **Soul Siphon burns everything its cylinder covers**, rather than locking the single nearest
-  enemy. How many it catches is simply how wide it has grown — at 8.5 it washes over most of a
+  enemy. How many it catches is simply how wide it has grown — at radius 5 it washes over most of a
   column's frontage at once, and lifesteal counts every point of that damage, which is what lets a
   maxed Warlock stand in front of a formation and hold. The ramp still tracks the nearest target
   alone, so widening never makes the ramp easier to hold, only more profitable while you do. (This
   supersedes the earlier rule that a wider beam never meant more targets.)
+
+  **The beam is drawn at its true radius.** This is not cosmetic bookkeeping — it was a real bug.
+  The beam used to be drawn at a fixed hairline thickness scaled by a token multiplier, so a
+  max-rank beam appeared about 0.6 units wide while killing everything within 18: enemies well
+  outside anything visible were dying. It now renders as a faint **wash at exactly the hit radius**
+  with a bright hairline **core** inside it — the core reads as "I am aiming a beam", the wash
+  shows what it actually covers. The wash tapers toward the muzzle and starts a few units out, so
+  the player is never inside it; that near section is the only place it understates, and anything
+  that close is point blank anyway.
 - **Cleave becomes a weather system.** The arc is already 360° from rank V, so the deep ranks buy
   reach and weight: a maxed sweep covers a 14-unit circle for 520 a hit on a 0.35s cooldown. It
   stays pure damage with no CC, and it is still melee — you have to be standing in the middle of

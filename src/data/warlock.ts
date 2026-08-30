@@ -94,17 +94,17 @@ const soulSiphon: AbilityWithTree = {
     // lose, which is where a maxed channel's damage actually comes from.
     { cost: 220, stats: { dps: 118, lifestealPct: 35, beamRadius: 2.2, range: 30 } },
     // Ranks VI-X (deep late game): the beam stops being a single-target lock and becomes a
-    // sweeping torrent. It simply gets WIDER — 2.2 to 8.5 — and burns everything the cylinder
+    // sweeping torrent. It simply gets WIDER — 2.2 to 5 — and burns everything the cylinder
     // covers for full damage, so how many enemies it catches is just how wide it has grown. At
-    // 8.5 it washes over most of a column's frontage at once, and lifesteal counts every point of
+    // 5 it washes over most of a column's frontage at once, and lifesteal counts every point of
     // it, which is what lets a maxed Warlock stand in front of a formation and hold. The ramp
     // still tracks the NEAREST target only (see cast): the lock is the ability's identity, and
     // widening never makes the ramp easier to hold, just more profitable while you do.
-    { cost: 600, stats: { dps: 155, beamRadius: 3.2 } },
-    { cost: 1500, stats: { dps: 205, beamRadius: 4.2 } },
-    { cost: 3500, stats: { dps: 270, beamRadius: 5.4, range: 34 } },
-    { cost: 7500, stats: { dps: 360, beamRadius: 6.8 } },
-    { cost: 16000, stats: { dps: 480, beamRadius: 8.5, range: 38 } },
+    { cost: 600, stats: { dps: 155, beamRadius: 2.6 } },
+    { cost: 1500, stats: { dps: 205, beamRadius: 3.1 } },
+    { cost: 3500, stats: { dps: 270, beamRadius: 3.7, range: 34 } },
+    { cost: 7500, stats: { dps: 360, beamRadius: 4.3 } },
+    { cost: 16000, stats: { dps: 480, beamRadius: 5, range: 38 } },
   ],
   tree: soulSiphonTree,
   cast(game: GameState, caster: PlayerState, origin: Vector3, aimPoint: Vector3, stats: Record<string, number>) {
@@ -123,7 +123,7 @@ const soulSiphon: AbilityWithTree = {
     }
 
     // Everything the beam is currently washing over, nearest first. At rank I the radius is 1.3
-    // and this is effectively the original single-target scan; the deep ranks widen it to 8.5 and
+    // and this is effectively the original single-target scan; the deep ranks widen it to 5 and
     // it becomes a torrent that burns a whole file of a column at once.
     beamHits.length = 0;
     for (const e of game.enemies) {
@@ -187,10 +187,10 @@ const soulSiphon: AbilityWithTree = {
     // Hook already establishes (it sets actionState.grappleAnchor directly from its own cast()).
     actionState.channelRamp01 = ramp01;
     actionState.channelEndPoint = endPoint;
-    // Presentation girth as a multiple of the base beam, so a widened rank-V beam actually looks
-    // wider instead of the upgrade being invisible. Deliberately proportional rather than the raw
-    // radius: 1.3 world units of acquisition tolerance drawn literally would be a tube, not a beam.
-    actionState.channelGirth = beamRadius / BEAM_BASE_RADIUS;
+    // The real radius, handed to the render layer verbatim: the drawn wash is exactly the volume
+    // this hit test sweeps, so a widened beam can never kill something the player couldn't see it
+    // covering. See render/aerialBeam.ts for why it's drawn as a faint wash plus a bright core.
+    actionState.channelRadius = beamRadius;
 
     if (best) {
       const rampMult = 1 + ramp01 * ((stats.rampBonusPct ?? 0) / 100);

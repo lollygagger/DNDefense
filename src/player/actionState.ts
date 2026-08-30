@@ -33,10 +33,11 @@ export const actionState = {
    *  channelling or while the beam isn't hitting anything. Drives the viewmodel's charge-up
    *  glow and the Curse of Agony/Soul Siphon "Focused Curse" combo. */
   channelRamp01: 0,
-  /** How thick to draw the channel beam, as a multiple of its normal girth (1 = normal). The
-   *  Warlock's rank-V beam widens its real acquisition radius, and this is how that upgrade
-   *  becomes visible; a purely presentational ratio, never the raw gameplay radius. */
-  channelGirth: 1,
+  /** The channel beam's real acquisition radius, in world units — the exact number its hit test
+   *  uses, not a presentational stand-in. render/aerialBeam.ts draws the beam's wash at precisely
+   *  this width so what you see is what it kills; drawing a token thickness instead is what let a
+   *  max-rank beam kill things 9 units off an axis it appeared 0.3 units wide. */
+  channelRadius: 1.3,
   /** World-space point the channel beam actually reaches this tick (an enemy hit, a blocked-by-
    *  cover point, or max range) — null while not channelling. Lets the viewmodel draw a beam
    *  from the rig's muzzle to wherever the beam is really landing. */
