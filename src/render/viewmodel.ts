@@ -550,7 +550,7 @@ function buildWarlockRig(): ViewmodelRig {
       // channel currently ends (an enemy, a blocked-by-cover point, or max range).
       R.camera.updateWorldMatrix(true, true);
       orb.getWorldPosition(beamFromScratch);
-      updateChannelBeam(channeling && !!actionState.channelEndPoint, beamFromScratch, actionState.channelEndPoint ?? undefined, WARLOCK_BEAM_COLOR, actionState.channelRadius);
+      updateChannelBeam(channeling && !!actionState.channelEndPoint, beamFromScratch, actionState.channelEndPoint ?? undefined, WARLOCK_BEAM_COLOR, actionState.channelRadius, actionState.channelGroundY);
     },
   };
 }

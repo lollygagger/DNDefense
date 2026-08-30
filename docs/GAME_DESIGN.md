@@ -137,11 +137,24 @@ Every one of them changes what the ability *is*, not just its numbers:
   **The beam is drawn at its true radius.** This is not cosmetic bookkeeping — it was a real bug.
   The beam used to be drawn at a fixed hairline thickness scaled by a token multiplier, so a
   max-rank beam appeared about 0.6 units wide while killing everything within 18: enemies well
-  outside anything visible were dying. It now renders as a faint **wash at exactly the hit radius**
-  with a bright hairline **core** inside it — the core reads as "I am aiming a beam", the wash
-  shows what it actually covers. The wash tapers toward the muzzle and starts a few units out, so
-  the player is never inside it; that near section is the only place it understates, and anything
-  that close is point blank anyway.
+  outside anything visible were dying.
+
+  It now draws in three parts, and the third one is the point. A hairline **core** runs the full
+  length — the "I am aiming a beam" read. A faint **wash** at exactly the hit radius shows the
+  volume, dimmed to nothing at the muzzle by a vertex-colour ramp so perspective can't pile all
+  its brightness up in the player's face. And a **footprint** at the hit radius marks where the
+  beam is burning — laid *flat on the ground*, not billboarded: a disc metres across facing the
+  camera, centred on an enemy barely a unit off the floor, buries half of itself in the terrain and
+  reads as the beam going underground. Flat, it can never sink, and it matches the lit-pool
+  language every other area effect in the game already uses. A small camera-facing spot rides at
+  the true landing point as well, so a beam held on something well off the ground still marks where
+  it is actually connecting rather than only the floor beneath it.
+
+  The footprint is what makes it legible. A wash on its own is an open tube: look down its axis
+  and you see straight through the hole, so every lit pixel ends up in the side walls and the one
+  place with no light on it is the spot actually being burned. Measured across the screen, the
+  beam added **zero** brightness at its own centre against 43-66 out at the walls — it read
+  inverted, a bright cloud around the staff with the enemies dying in the dim part of it.
 - **Cleave becomes a weather system.** The arc is already 360° from rank V, so the deep ranks buy
   reach and weight: a maxed sweep covers a 14-unit circle for 520 a hit on a 0.35s cooldown. It
   stays pure damage with no CC, and it is still melee — you have to be standing in the middle of

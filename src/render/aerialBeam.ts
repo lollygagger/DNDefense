@@ -73,16 +73,16 @@ export function updateBeams(dt: number): void {
 // not from a sim event, since a channel's origin is the rig's own muzzle point every frame.
 let channelMesh: THREE.Mesh | null = null; // the wash: drawn at the beam's TRUE hit radius
 let channelCore: THREE.Mesh | null = null; // the bright thin line inside it
+let channelDisc: THREE.Mesh | null = null; // the lit footprint, flat on the ground
+let channelSpot: THREE.Mesh | null = null; // small billboard at the true landing point
 const CHANNEL_UP = new THREE.Vector3(0, 1, 0);
 const channelDir = new THREE.Vector3();
 const CHANNEL_CORE_RADIUS = 0.16;
-/** The wash starts this far down the beam instead of at the muzzle. At deep ranks the beam is
- *  metres across, so a wash drawn from the eye puts the camera *inside* the cylinder and floods
- *  the screen with its interior wall. Skipping the first few units keeps the player outside it
- *  while costing nothing in honesty — anything close enough to fall in that gap is already point
- *  blank and plainly visible. The thin core still runs the whole length, so the beam always
- *  reads as leaving the staff. */
-const CHANNEL_WASH_NEAR = 3;
+/** The wash still skips the first stretch of the beam. The brightness ramp already stops the
+ *  muzzle end from glowing, but the camera sitting inside even unlit geometry is worth avoiding —
+ *  and the thin core runs the full length regardless, so the beam always reads as leaving the
+ *  staff. Small enough that anything in the gap is point blank and plainly visible anyway. */
+const CHANNEL_WASH_NEAR = 1.5;
 
 /** TWO meshes, because one can't tell the truth and still read as a beam.
  *
@@ -95,22 +95,39 @@ const CHANNEL_WASH_NEAR = 3;
  *  Drawn honestly and alone, though, a wide beam stops looking like a beam and becomes a fog
  *  bank. So the wash is faint and a dense core rides inside it at a fixed hairline width — the
  *  core is the "I am aiming a beam" read, the wash is the "this is what it covers" read. */
-function ensureChannelMeshes(): { wash: THREE.Mesh; core: THREE.Mesh } {
-  if (!channelMesh || !channelCore) {
-    // Unit geometries, scaled per frame. The wash TAPERS: full radius at the far end (radiusTop —
-    // the quaternion below maps +Y onto the beam direction, so top is the business end) and a
-    // quarter of it at the muzzle. Drawn as a true cylinder it is metres across right at the
-    // camera and swamps the screen; the taper keeps it honest exactly where the enemies are while
-    // staying out of the player's face. The narrow near section is the only place it understates,
-    // and anything that close is point blank and plainly visible anyway.
-    const washGeo = new THREE.CylinderGeometry(1, 0.25, 1, 16, 1, true);
+function ensureChannelMeshes(): { wash: THREE.Mesh; core: THREE.Mesh; disc: THREE.Mesh; spot: THREE.Mesh } {
+  if (!channelMesh || !channelCore || !channelDisc || !channelSpot) {
+    // Unit geometries, scaled per frame. The wash is a straight cylinder at the beam's TRUE radius
+    // its whole length — no taper, so it never understates what the hit test sweeps.
+    //
+    // What keeps that watchable is a brightness ramp baked into vertex colours instead: black at
+    // the muzzle, full colour at the far end. Perspective and additive blending otherwise conspire
+    // to put all the light in exactly the wrong place — the near end of the cylinder is closest to
+    // the camera, so it covers the most screen, and its walls are seen nearly edge-on so their
+    // alpha piles up. The result read inverted: a blazing cloud around the staff, and the enemies
+    // actually being burned sitting in the dimmest part of it. Multiplying by a near-black vertex
+    // colour makes the muzzle end contribute nothing under additive blending, so the glow lands
+    // where the damage does. 8 height segments give the ramp something to interpolate across.
+    const washGeo = new THREE.CylinderGeometry(1, 1, 1, 16, 8, true);
+    const wpos = washGeo.attributes.position;
+    const wcol = new Float32Array(wpos.count * 3);
+    for (let i = 0; i < wpos.count; i++) {
+      // y runs -0.5 (muzzle) .. +0.5 (far end); squared so it stays dark well past the player.
+      const t = Math.min(1, Math.max(0, wpos.getY(i) + 0.5));
+      const k = t * t;
+      wcol[i * 3] = k;
+      wcol[i * 3 + 1] = k;
+      wcol[i * 3 + 2] = k;
+    }
+    washGeo.setAttribute('color', new THREE.BufferAttribute(wcol, 3));
     const geo = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
     channelMesh = new THREE.Mesh(
       washGeo,
       new THREE.MeshBasicMaterial({
         color: 0xff2fb8,
+        vertexColors: true, // the muzzle-to-target brightness ramp above
         transparent: true,
-        opacity: 0.11, // faint: it's a volume, not a surface
+        opacity: 0.09, // just enough to show the volume; the disc below carries the real read
         depthWrite: false,
         side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
@@ -127,13 +144,30 @@ function ensureChannelMeshes(): { wash: THREE.Mesh; core: THREE.Mesh } {
         blending: THREE.AdditiveBlending,
       })
     );
-    for (const m of [channelMesh, channelCore]) {
+    // The FOOTPRINT: a camera-facing disc at the point the beam lands, at the full hit radius.
+    // Without it the wash is an open tube — look down its axis and you see straight through the
+    // hole, so every lit pixel is off in the side walls and the spot actually being burned is the
+    // one place with no light on it at all. Measured before this existed: zero added brightness
+    // at the beam's centre against 43-66 out at the walls, which is why it read inverted.
+    channelDisc = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 24),
+      new THREE.MeshBasicMaterial({
+        color: 0xff6fd0,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    channelSpot = new THREE.Mesh(channelDisc.geometry, channelDisc.material);
+    for (const m of [channelMesh, channelCore, channelDisc, channelSpot]) {
       m.frustumCulled = false;
       m.visible = false;
       R.scene.add(m);
     }
   }
-  return { wash: channelMesh, core: channelCore };
+  return { wash: channelMesh, core: channelCore, disc: channelDisc, spot: channelSpot };
 }
 
 /** Show (and reposition) or hide the persistent channel beam. `active=false` (or a missing
@@ -144,12 +178,15 @@ export function updateChannelBeam(
   from?: THREE.Vector3,
   to?: THREE.Vector3,
   color?: number,
-  radius = CHANNEL_CORE_RADIUS
+  radius = CHANNEL_CORE_RADIUS,
+  groundY = 0
 ): void {
-  const { wash, core } = ensureChannelMeshes();
+  const { wash, core, disc, spot } = ensureChannelMeshes();
   if (!active || !from || !to) {
     wash.visible = false;
     core.visible = false;
+    disc.visible = false;
+    spot.visible = false;
     return;
   }
   channelDir.copy(to).sub(from);
@@ -157,6 +194,8 @@ export function updateChannelBeam(
   if (dist < 0.05) {
     wash.visible = false;
     core.visible = false;
+    disc.visible = false;
+    spot.visible = false;
     return;
   }
   channelDir.divideScalar(dist);
@@ -178,4 +217,26 @@ export function updateChannelBeam(
   wash.position.copy(from).addScaledVector(channelDir, CHANNEL_WASH_NEAR + washLen / 2);
   wash.quaternion.copy(core.quaternion);
   wash.scale.set(radius, washLen, radius);
+
+  // Footprint marking where the beam is burning. Laid FLAT on the ground rather than billboarded:
+  // a camera-facing disc metres across, centred on an enemy standing barely a unit off the floor,
+  // buries its lower half in the terrain and reads as the beam going underground. Flat on the
+  // ground it can never sink, and it matches the language every other area effect in the game
+  // already uses — a lit pool on the floor is exactly what "this patch is being burned" looks
+  // like. Lifted a hair to stay off the surface it sits on.
+  disc.visible = true;
+  disc.position.set(to.x, groundY + 0.06, to.z);
+  disc.rotation.set(-Math.PI / 2, 0, 0);
+  disc.scale.setScalar(radius);
+
+  // ...and a small billboard right at the true landing point, so a beam held on something well
+  // off the ground (a flyer) still marks where it is actually connecting, not just the floor
+  // beneath it. Deliberately small: the flat pool carries the width, this only carries the spot.
+  const spotR = Math.min(radius * 0.35, 1.2);
+  spot.visible = to.y - groundY > spotR * 0.5; // only once it's clear of its own ground pool
+  if (spot.visible) {
+    spot.position.copy(to).addScaledVector(channelDir, -0.15);
+    spot.quaternion.copy(R.camera.quaternion);
+    spot.scale.setScalar(spotR);
+  }
 }

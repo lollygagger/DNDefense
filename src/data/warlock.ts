@@ -187,6 +187,8 @@ const soulSiphon: AbilityWithTree = {
     // Hook already establishes (it sets actionState.grappleAnchor directly from its own cast()).
     actionState.channelRamp01 = ramp01;
     actionState.channelEndPoint = endPoint;
+    // Ground under the landing point, so the render layer can lay the footprint flat on it.
+    actionState.channelGroundY = game.castle.worldHeight(endPoint.x, endPoint.z);
     // The real radius, handed to the render layer verbatim: the drawn wash is exactly the volume
     // this hit test sweeps, so a widened beam can never kill something the player couldn't see it
     // covering. See render/aerialBeam.ts for why it's drawn as a faint wash plus a bright core.

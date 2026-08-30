@@ -38,6 +38,10 @@ export const actionState = {
    *  this width so what you see is what it kills; drawing a token thickness instead is what let a
    *  max-rank beam kill things 9 units off an axis it appeared 0.3 units wide. */
   channelRadius: 1.3,
+  /** Walkable ground height directly under the channel beam's landing point. The footprint that
+   *  marks where the beam is burning is laid FLAT on the ground rather than billboarded, so it
+   *  can't sink through the terrain when the beam lands low — see render/aerialBeam.ts. */
+  channelGroundY: 0,
   /** World-space point the channel beam actually reaches this tick (an enemy hit, a blocked-by-
    *  cover point, or max range) — null while not channelling. Lets the viewmodel draw a beam
    *  from the rig's muzzle to wherever the beam is really landing. */
